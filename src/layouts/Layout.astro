@@ -9,7 +9,7 @@ export interface Props {
 }
 
 const { title, showFooter = true } = Astro.props;
-const description = "Last Epoch Stash Search Builder - Create complex search strings with ease";
+const description = "Last Epoch stash search builder with regex support. Create complex item search strings using regular expressions, macros, and filters. Find items by affixes, tiers, legendary potential, and more.";
 const siteUrl = "https://checkmatez.github.io/eternity";
 const imageUrl = `${siteUrl}/favicon.svg`;
 ---
@@ -19,6 +19,7 @@ const imageUrl = `${siteUrl}/favicon.svg`;
   <head>
     <meta charset="UTF-8" />
     <meta name="description" content={description} />
+    <meta name="keywords" content="Last Epoch, stash search, regex, regexp, regular expression, item search, stash filter, legendary potential, affixes, tiers, ARPG, loot filter" />
     <meta name="viewport" content="width=device-width" />
     <meta name="generator" content={Astro.generator} />
     
@@ -45,6 +46,31 @@ const imageUrl = `${siteUrl}/favicon.svg`;
     
     <title>{title}</title>
     <ClientRouter />
+
+    <!-- Structured Data for SEO -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Last Epoch Stash Search Builder",
+        "description": "Create complex Last Epoch stash search strings using regex patterns, macros, and filters",
+        "url": "https://checkmatez.github.io/eternity",
+        "applicationCategory": "GameApplication",
+        "operatingSystem": "Web Browser",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "featureList": [
+          "Regex pattern search",
+          "Item filter creation",
+          "Legendary potential search",
+          "Affix tier filtering",
+          "Macro support"
+        ]
+      }
+    </script>
 
     <!-- Cloudflare Web Analytics -->
     <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "48064559f53e468497c050f29b610bf1"}'></script>

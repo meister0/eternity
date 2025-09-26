@@ -29,7 +29,6 @@ const getOperatorSymbol = (operator: Operator): string => {
 const generateSearchString = (currentState: SearchState): string => {
   const parts: string[] = [];
 
-  // Item potential
   Object.entries(currentState.itemPotential).forEach(([key, macro]) => {
     if (macro.enabled) {
       if ('value' in macro) {
@@ -41,22 +40,18 @@ const generateSearchString = (currentState: SearchState): string => {
     }
   });
 
-  // Item rarity
   if (currentState.itemRarity) {
     parts.push(currentState.itemRarity);
   }
 
-  // Class requirements
   currentState.classRequirements.forEach((cls) => {
     parts.push(cls);
   });
 
-  // Item types
   currentState.itemTypes.forEach((type) => {
     parts.push(type);
   });
 
-  // Equipment requirements
   Object.entries(currentState.equipmentRequirements).forEach(([key, macro]) => {
     if (macro.enabled) {
       if ('value' in macro) {
@@ -68,14 +63,12 @@ const generateSearchString = (currentState: SearchState): string => {
     }
   });
 
-  // Affix tiers (enabled if exists in array)
   currentState.affixTiers.forEach((affix) => {
     const countPrefix = affix.count > 1 ? affix.count : '';
     const operator = affix.operator === '=' ? '' : affix.operator;
     parts.push(`${countPrefix}T${affix.tier}${operator}`);
   });
 
-  // Affix counts
   Object.entries(currentState.affixCounts).forEach(([key, macro]) => {
     if (macro.enabled) {
       const operator = getOperatorSymbol(macro.operator);
@@ -84,14 +77,12 @@ const generateSearchString = (currentState: SearchState): string => {
     }
   });
 
-  // Regex patterns (enabled if not empty)
   currentState.regexPatterns.forEach((regex) => {
     if (regex.pattern.trim()) {
       parts.push(`/${regex.pattern}/`);
     }
   });
 
-  // Join with the selected global operator
   return parts.join(currentState.globalOperator);
 };
 
@@ -105,17 +96,14 @@ export const StashSearchBuilder = () => {
 
   // Debounced URL update when search string changes
   useEffect(() => {
-    // Clear existing timeout
     if (updateTimeoutRef.current) {
       clearTimeout(updateTimeoutRef.current);
     }
 
-    // Set new timeout for URL update (debounce)
     updateTimeoutRef.current = window.setTimeout(() => {
       updateURL(searchString);
     }, 500);
 
-    // Cleanup timeout on unmount
     return () => {
       if (updateTimeoutRef.current) {
         clearTimeout(updateTimeoutRef.current);
@@ -123,7 +111,6 @@ export const StashSearchBuilder = () => {
     };
   }, [searchString]);
 
-  // Handle macro with value changes
   const updateMacroWithValue = (
     category: keyof SearchState,
     key: string,
@@ -142,18 +129,6 @@ export const StashSearchBuilder = () => {
     }));
   };
 
-  // Handle simple macro changes
-  const updateSimpleMacro = (category: keyof SearchState, key: string, enabled: boolean) => {
-    setState((prevState) => ({
-      ...prevState,
-      [category]: {
-        ...(prevState[category] as Record<string, any>),
-        [key]: { enabled },
-      },
-    }));
-  };
-
-  // Handle set changes (class requirements, item types)
   const toggleSetItem = <T,>(category: 'classRequirements' | 'itemTypes', item: T) => {
     setState((prevState) => {
       const newSet = new Set(prevState[category]) as Set<T>;
@@ -169,7 +144,6 @@ export const StashSearchBuilder = () => {
     });
   };
 
-  // Add new affix tier
   const addAffixTier = () => {
     setState((prevState) => ({
       ...prevState,
@@ -177,7 +151,6 @@ export const StashSearchBuilder = () => {
     }));
   };
 
-  // Update affix tier
   const updateAffixTier = (index: number, field: keyof AffixTier, value: number | Operator) => {
     setState((prevState) => ({
       ...prevState,
@@ -187,7 +160,6 @@ export const StashSearchBuilder = () => {
     }));
   };
 
-  // Remove affix tier
   const removeAffixTier = (index: number) => {
     setState((prevState) => ({
       ...prevState,
@@ -195,7 +167,6 @@ export const StashSearchBuilder = () => {
     }));
   };
 
-  // Add new regex pattern
   const addRegexPattern = (pattern: string = '') => {
     setState((prevState) => ({
       ...prevState,
@@ -203,7 +174,6 @@ export const StashSearchBuilder = () => {
     }));
   };
 
-  // Update regex pattern
   const updateRegexPattern = (index: number, pattern: string) => {
     setState((prevState) => ({
       ...prevState,
@@ -227,7 +197,6 @@ export const StashSearchBuilder = () => {
     setState((prevState) => {
       const existingIndex = prevState.regexPatterns.findIndex((p) => p.pattern === pattern);
       if (existingIndex >= 0) {
-        // Remove the pattern
         return {
           ...prevState,
           regexPatterns:
@@ -236,12 +205,10 @@ export const StashSearchBuilder = () => {
               : [{ pattern: '' }],
         };
       } else {
-        // Add the pattern - insert before the last empty pattern if it exists
         const lastIndex = prevState.regexPatterns.length - 1;
         const lastPattern = prevState.regexPatterns[lastIndex];
 
         if (lastPattern && lastPattern.pattern === '') {
-          // Insert before the empty pattern
           return {
             ...prevState,
             regexPatterns: [
@@ -251,7 +218,6 @@ export const StashSearchBuilder = () => {
             ],
           };
         } else {
-          // Add at the end
           return {
             ...prevState,
             regexPatterns: [...prevState.regexPatterns, { pattern }],
@@ -261,7 +227,6 @@ export const StashSearchBuilder = () => {
     });
   };
 
-  // Copy to clipboard
   const copyToClipboard = async () => {
     try {
       await navigator.clipboard.writeText(searchString);
@@ -272,7 +237,6 @@ export const StashSearchBuilder = () => {
     }
   };
 
-  // Share current search string as link
   const shareState = async () => {
     try {
       const shareableLink = generateShareableLink(searchString);
@@ -284,7 +248,6 @@ export const StashSearchBuilder = () => {
     }
   };
 
-  // Toggle global operator
   const toggleGlobalOperator = () => {
     setState((prevState) => ({
       ...prevState,
@@ -292,7 +255,6 @@ export const StashSearchBuilder = () => {
     }));
   };
 
-  // Clear all
   const clearAll = () => {
     setState(createInitialState());
     clearURLState();
@@ -306,7 +268,8 @@ export const StashSearchBuilder = () => {
             Last Epoch Stash Search Builder
           </h1>
           <p className="text-gray-300 text-sm md:text-base">
-            Build complex stash search strings easily
+            Configure filters below, then copy the generated search string and paste into your stash
+            search
           </p>
         </div>
 
