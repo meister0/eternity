@@ -13,6 +13,7 @@ import {
   AffixTiersSection,
   ClassRequirementsSection,
   CustomSearchSection,
+  EquipmentSlotsSection,
   ItemPotentialSection,
   ItemRaritySection,
   ItemTypesSection,
@@ -50,6 +51,10 @@ const generateSearchString = (currentState: SearchState): string => {
 
   currentState.itemTypes.forEach((type) => {
     parts.push(type);
+  });
+
+  currentState.equipmentSlots.forEach((slot) => {
+    parts.push(slot);
   });
 
   Object.entries(currentState.equipmentRequirements).forEach(([key, macro]) => {
@@ -129,7 +134,10 @@ export const StashSearchBuilder = () => {
     }));
   };
 
-  const toggleSetItem = <T,>(category: 'classRequirements' | 'itemTypes', item: T) => {
+  const toggleSetItem = <T,>(
+    category: 'classRequirements' | 'itemTypes' | 'equipmentSlots',
+    item: T,
+  ) => {
     setState((prevState) => {
       const newSet = new Set(prevState[category]) as Set<T>;
       if (newSet.has(item)) {
@@ -311,6 +319,11 @@ export const StashSearchBuilder = () => {
             />
           </div>
         </div>
+
+        <EquipmentSlotsSection
+          equipmentSlots={state.equipmentSlots}
+          toggleSetItem={toggleSetItem}
+        />
 
         <CustomSearchSection
           regexPatterns={state.regexPatterns}

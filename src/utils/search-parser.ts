@@ -1,5 +1,7 @@
+import { ALL_EQUIPMENT_SLOTS } from '../data/stash-macros';
 import type {
   ClassRequirement,
+  EquipmentSlot,
   ItemRarity,
   ItemType,
   Operator,
@@ -57,13 +59,17 @@ export function parseSearchString(searchString: string, fallbackState: SearchSta
         continue;
       }
 
-      // Simple Item Potential: WT, SwapAttributes
-      if (/^(WT|SwapAttributes)$/i.test(part)) {
-        const key =
-          part === 'SwapAttributes'
-            ? 'SwapAttributes'
-            : (part.toUpperCase() as keyof typeof state.itemPotential);
-        if (key in state.itemPotential) {
+      // Simple Item Potential: WT, SwapAttributes, Corrupted, Corruptable, Ruined
+      if (/^(WT|SwapAttributes|Corrupted|Corruptable|Ruined)$/i.test(part)) {
+        const simpleKeys: Record<string, keyof typeof state.itemPotential> = {
+          wt: 'WT',
+          swapattributes: 'SwapAttributes',
+          corrupted: 'Corrupted',
+          corruptable: 'Corruptable',
+          ruined: 'Ruined',
+        };
+        const key = simpleKeys[part.toLowerCase()];
+        if (key && key in state.itemPotential) {
           (state.itemPotential[key] as SimpleMacro) = { enabled: true };
         }
         continue;
@@ -160,6 +166,15 @@ export function parseSearchString(searchString: string, fallbackState: SearchSta
         continue;
       }
 
+      // Equipment Slots
+      const matchedSlot = ALL_EQUIPMENT_SLOTS.find(
+        (slot) => slot.toLowerCase() === part.toLowerCase(),
+      );
+      if (matchedSlot) {
+        state.equipmentSlots.add(matchedSlot as EquipmentSlot);
+        continue;
+      }
+
       // Regex patterns: /pattern/
       const regexMatch = part.match(/^\/(.+)\/$/);
       if (regexMatch) {
@@ -198,10 +213,14 @@ export function validateSearchString(searchString: string): boolean {
         WT: { enabled: false },
         FP: { enabled: false, value: 0, operator: '+' },
         SwapAttributes: { enabled: false },
+        Corrupted: { enabled: false },
+        Corruptable: { enabled: false },
+        Ruined: { enabled: false },
       },
       itemRarity: null,
       classRequirements: new Set(),
       itemTypes: new Set(),
+      equipmentSlots: new Set(),
       equipmentRequirements: {
         Lvl: { enabled: false, value: 1, operator: '=' },
         CoF: { enabled: false },

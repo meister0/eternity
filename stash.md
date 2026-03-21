@@ -93,6 +93,32 @@ Combine searches using operators:
 - `Experimental` - Number of experimental affixes
 - `Personal` - Number of personal affixes
 
+### Corruption
+
+- `Corrupted` - Corrupted items
+- `Corruptable` - Items that can be corrupted
+- `Ruined` - Ruined items
+
+### Equipment Slots
+
+**Armor:**
+
+- `Helmet`, `Body`, `Belt`, `Boots`, `Gloves`, `Amulet`, `Ring`, `Relic`
+
+**Weapons:**
+
+- `1HAxe`, `Dagger`, `1HMace`, `Sceptre`, `1HSword`, `Wand`
+- `2HAxe`, `2HMace`, `Spear`, `Staff`, `2HSword`, `Bow`
+
+**Off Hands:**
+
+- `Quiver`, `Shield`, `Catalyst`
+
+**Idols:**
+
+- `Idol`, `OmenIdol`
+- `Small`, `Minor`, `Humble`, `Stout`, `Grand`, `Large`, `Ornate`, `Huge`, `Adorned`, `Altar`
+
 ### Special
 
 - `SwapAttributes` - Items affected by Relic of the Observer

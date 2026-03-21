@@ -30,7 +30,10 @@ export interface SimpleMacroUpdateProps {
 
 // Props for set item toggles
 export interface SetToggleProps {
-  toggleSetItem: <T>(category: 'classRequirements' | 'itemTypes', item: T) => void;
+  toggleSetItem: <T>(
+    category: 'classRequirements' | 'itemTypes' | 'equipmentSlots',
+    item: T,
+  ) => void;
 }
 
 // Props for affix tier management
@@ -57,6 +60,10 @@ export interface ClassRequirementsSectionProps extends SetToggleProps {
 
 export interface ItemTypesSectionProps extends SetToggleProps {
   itemTypes: SearchState['itemTypes'];
+}
+
+export interface EquipmentSlotsSectionProps extends SetToggleProps {
+  equipmentSlots: SearchState['equipmentSlots'];
 }
 
 export interface EquipmentRequirementsSectionProps extends MacroUpdateProps {

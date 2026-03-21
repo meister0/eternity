@@ -1,4 +1,10 @@
-import type { ClassRequirement, ItemRarity, ItemType, SearchPreset } from '../types/stash/search';
+import type {
+  ClassRequirement,
+  EquipmentSlot,
+  ItemRarity,
+  ItemType,
+  SearchPreset,
+} from '../types/stash-search';
 
 // Item potential macro definitions
 export const ITEM_POTENTIAL_MACROS = {
@@ -42,6 +48,24 @@ export const ITEM_POTENTIAL_MACROS = {
     description: 'Items affected by Relic of the Observer',
     hasValue: false,
   },
+  Corrupted: {
+    code: 'Corrupted',
+    name: 'Corrupted',
+    description: 'Corrupted items',
+    hasValue: false,
+  },
+  Corruptable: {
+    code: 'Corruptable',
+    name: 'Corruptable',
+    description: 'Items that can be corrupted',
+    hasValue: false,
+  },
+  Ruined: {
+    code: 'Ruined',
+    name: 'Ruined',
+    description: 'Ruined items',
+    hasValue: false,
+  },
 } as const;
 
 // Item rarity options
@@ -72,6 +96,73 @@ export const ITEM_TYPES: { value: ItemType; label: string; description: string }
   { value: 'Experimentable', label: 'Experimentable', description: 'Boots, gloves, or belts' },
   { value: 'WeaverIdol', label: 'Weaver Idol', description: 'Weaver idols' },
 ];
+
+// Equipment slot macros (grouped for UI)
+export const EQUIPMENT_SLOT_MACROS: {
+  label: string;
+  items: { value: EquipmentSlot; label: string }[];
+}[] = [
+  {
+    label: 'Armor',
+    items: [
+      { value: 'Helmet', label: 'Helmet' },
+      { value: 'Body', label: 'Body' },
+      { value: 'Belt', label: 'Belt' },
+      { value: 'Boots', label: 'Boots' },
+      { value: 'Gloves', label: 'Gloves' },
+      { value: 'Amulet', label: 'Amulet' },
+      { value: 'Ring', label: 'Ring' },
+      { value: 'Relic', label: 'Relic' },
+    ],
+  },
+  {
+    label: 'Weapons',
+    items: [
+      { value: '1HAxe', label: '1H Axe' },
+      { value: 'Dagger', label: 'Dagger' },
+      { value: '1HMace', label: '1H Mace' },
+      { value: 'Sceptre', label: 'Sceptre' },
+      { value: '1HSword', label: '1H Sword' },
+      { value: 'Wand', label: 'Wand' },
+      { value: '2HAxe', label: '2H Axe' },
+      { value: '2HMace', label: '2H Mace' },
+      { value: 'Spear', label: 'Spear' },
+      { value: 'Staff', label: 'Staff' },
+      { value: '2HSword', label: '2H Sword' },
+      { value: 'Bow', label: 'Bow' },
+    ],
+  },
+  {
+    label: 'Off Hands',
+    items: [
+      { value: 'Quiver', label: 'Quiver' },
+      { value: 'Shield', label: 'Shield' },
+      { value: 'Catalyst', label: 'Catalyst' },
+    ],
+  },
+  {
+    label: 'Idols',
+    items: [
+      { value: 'Idol', label: 'Idol' },
+      { value: 'OmenIdol', label: 'Omen Idol' },
+      { value: 'Small', label: 'Small' },
+      { value: 'Minor', label: 'Minor' },
+      { value: 'Humble', label: 'Humble' },
+      { value: 'Stout', label: 'Stout' },
+      { value: 'Grand', label: 'Grand' },
+      { value: 'Large', label: 'Large' },
+      { value: 'Ornate', label: 'Ornate' },
+      { value: 'Huge', label: 'Huge' },
+      { value: 'Adorned', label: 'Adorned' },
+      { value: 'Altar', label: 'Altar' },
+    ],
+  },
+];
+
+// All equipment slot values (flat list for parsing)
+export const ALL_EQUIPMENT_SLOTS: EquipmentSlot[] = EQUIPMENT_SLOT_MACROS.flatMap((group) =>
+  group.items.map((item) => item.value),
+);
 
 // Equipment requirement macros
 export const EQUIPMENT_MACROS = {
@@ -166,108 +257,8 @@ export const SEARCH_PRESETS: SearchPreset[] = [
   },
 ];
 
-// Common regex patterns
+// Common regex patterns (equipment slots now have dedicated macros)
 export const REGEX_PATTERNS = [
-  {
-    name: 'Helmet',
-    pattern: 'helmet',
-    description: 'Helmet items',
-  },
-  {
-    name: 'Body Armor',
-    pattern: 'body armor',
-    description: 'Body armor items',
-  },
-  {
-    name: 'Gloves',
-    pattern: 'gloves',
-    description: 'Glove items',
-  },
-  {
-    name: 'Belt',
-    pattern: 'belt',
-    description: 'Belt items',
-  },
-  {
-    name: 'Boots',
-    pattern: 'boots',
-    description: 'Boot items',
-  },
-  {
-    name: 'Sword',
-    pattern: 'sword',
-    description: 'Sword items',
-  },
-  {
-    name: 'Axe',
-    pattern: 'axe',
-    description: 'Axe items',
-  },
-  {
-    name: 'Mace',
-    pattern: 'mace',
-    description: 'Mace items',
-  },
-  {
-    name: 'Dagger',
-    pattern: 'dagger',
-    description: 'Dagger items',
-  },
-  {
-    name: 'Scepter',
-    pattern: 'scepter',
-    description: 'Scepter items',
-  },
-  {
-    name: 'Wand',
-    pattern: 'wand',
-    description: 'Wand items',
-  },
-  {
-    name: 'Spear',
-    pattern: 'spear',
-    description: 'Spear items',
-  },
-  {
-    name: 'Staff',
-    pattern: 'staff',
-    description: 'Staff items',
-  },
-  {
-    name: 'Bow',
-    pattern: 'bow',
-    description: 'Bow items',
-  },
-  {
-    name: 'Quiver',
-    pattern: 'quiver',
-    description: 'Quiver items',
-  },
-  {
-    name: 'Shield',
-    pattern: 'shield',
-    description: 'Shield items',
-  },
-  {
-    name: 'Catalyst',
-    pattern: 'catalyst',
-    description: 'Catalyst items',
-  },
-  {
-    name: 'Ring',
-    pattern: 'ring',
-    description: 'Ring items',
-  },
-  {
-    name: 'Amulet',
-    pattern: 'amulet',
-    description: 'Amulet items',
-  },
-  {
-    name: 'Relic',
-    pattern: 'relic',
-    description: 'Relic items',
-  },
   {
     name: 'Crit Items',
     pattern: 'crit',

@@ -3,6 +3,7 @@ export { AffixTiersSection } from './AffixTiersSection';
 export { ClassRequirementsSection } from './ClassRequirementsSection';
 export { CustomSearchSection } from './CustomSearchSection';
 export { EquipmentRequirementsSection } from './EquipmentRequirementsSection';
+export { EquipmentSlotsSection } from './EquipmentSlotsSection';
 export { ItemPotentialSection } from './ItemPotentialSection';
 export { ItemRaritySection } from './ItemRaritySection';
 export { ItemTypesSection } from './ItemTypesSection';

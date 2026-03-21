@@ -21,6 +21,9 @@ export interface ItemPotential {
   WT: SimpleMacro;
   FP: MacroWithValue;
   SwapAttributes: SimpleMacro;
+  Corrupted: SimpleMacro;
+  Corruptable: SimpleMacro;
+  Ruined: SimpleMacro;
 }
 
 // Item rarity options
@@ -39,6 +42,48 @@ export type ClassRequirement = 'Acolyte' | 'Mage' | 'Primalist' | 'Rogue' | 'Sen
 
 // Item type options
 export type ItemType = 'Set' | 'RealSet' | 'ReforgedSet' | 'Experimentable' | 'WeaverIdol';
+
+// Equipment slot options
+export type EquipmentSlot =
+  // Armor
+  | 'Helmet'
+  | 'Body'
+  | 'Belt'
+  | 'Boots'
+  | 'Gloves'
+  | 'Amulet'
+  | 'Ring'
+  | 'Relic'
+  // Weapons
+  | '1HAxe'
+  | 'Dagger'
+  | '1HMace'
+  | 'Sceptre'
+  | '1HSword'
+  | 'Wand'
+  | '2HAxe'
+  | '2HMace'
+  | 'Spear'
+  | 'Staff'
+  | '2HSword'
+  | 'Bow'
+  // Off Hands
+  | 'Quiver'
+  | 'Shield'
+  | 'Catalyst'
+  // Idols
+  | 'Idol'
+  | 'OmenIdol'
+  | 'Small'
+  | 'Minor'
+  | 'Humble'
+  | 'Stout'
+  | 'Grand'
+  | 'Large'
+  | 'Ornate'
+  | 'Huge'
+  | 'Adorned'
+  | 'Altar';
 
 // Equipment requirements
 export interface EquipmentRequirements {
@@ -83,6 +128,7 @@ export interface SearchState {
   itemRarity: ItemRarity;
   classRequirements: Set<ClassRequirement>;
   itemTypes: Set<ItemType>;
+  equipmentSlots: Set<EquipmentSlot>;
   equipmentRequirements: EquipmentRequirements;
 
   // Affix configuration
