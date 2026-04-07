@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Active Plan
+
+**READ FIRST**: [`PLAN.md`](./PLAN.md) — full specification for the Base/Affix-aware Search Generator feature currently being built. Contains data source schemas, tier indexing decisions, UX design, file structure, phased task breakdown, and parallel execution waves.
+
+If you're picking up work in a fresh session, start with PLAN.md §0 ("How to resume").
+
 ## Development Commands
 
 - `npm run dev` - Start development server at localhost:4321
