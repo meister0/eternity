@@ -1,0 +1,65 @@
+# Update PoB-LE Data
+#
+# What this does: Re-downloads upstream affix/base data from
+# PathOfBuildingForLastEpoch, re-runs the local processor, and opens an
+# automated PR if anything changed (signal lives in data/raw/_meta.json
+# since data/raw/*.json is gitignored — see .gitignore).
+#
+# Schedule: every Monday at 06:00 UTC.
+# Manual trigger: GitHub Actions tab -> "Update PoB-LE Data" -> "Run workflow".
+#
+# One-time setup: the `data-update` label referenced below must exist in the
+# repo. If the first run fails to apply the label, create it manually once in
+# the GitHub UI (Issues -> Labels -> New label) and re-run.
+#
+# Spec: see PLAN.md §7.2 (data refresh) and §8 P0.4 (this workflow).
+
+name: Update PoB-LE Data
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download upstream PoB-LE data
+        run: npm run update-data
+
+      - name: Process raw data into public/data
+        run: npm run process-data
+
+      - name: Open PR if data changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore(data): update affix dump from PoB-LE [auto]"
+          title: "chore(data): update affix dump from PoB-LE [auto]"
+          body: |
+            Automated update of PoB-LE affix and base data.
+
+            **Source:** https://github.com/Musholic/PathOfBuildingForLastEpoch
+            **Triggered:** ${{ github.event_name }}
+            **Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            See `data/raw/_meta.json` for the upstream commit hash and file hashes.
+          branch: chore/data-update
+          delete-branch: true
+          labels: data-update

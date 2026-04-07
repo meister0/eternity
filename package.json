@@ -10,7 +10,9 @@
     "astro": "astro",
     "format": "prettier --write --ignore-unknown \"**/*\"",
     "format:check": "prettier --check --ignore-unknown \"**/*\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "update-data": "node scripts/update-data.mjs",
+    "process-data": "node scripts/process-data.mjs"
   },
   "dependencies": {
     "@astrojs/react": "^5.0.1",

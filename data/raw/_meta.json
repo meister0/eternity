@@ -1,0 +1,19 @@
+{
+  "fetchedAt": "2026-04-07T12:16:29.176Z",
+  "source": "https://raw.githubusercontent.com/Musholic/PathOfBuildingForLastEpoch/master/src/Data",
+  "commitHash": "91ac61a0f982c2a0369a84a8cbeafe08b0882fb9",
+  "files": {
+    "affixes-id-map.json": {
+      "sha256": "ae19de0dba7198cc4982b9b05afbe6de598ac4a6f98b00d6dc89cf216ff614af",
+      "size": 20653
+    },
+    "bases-full.json": {
+      "sha256": "5a5e7752cfc9436630439d358ba33098ac8346826f936e711e451c342c916615",
+      "size": 246810
+    },
+    "ModItem.json": {
+      "sha256": "f1eb63fe60892911ba95f058d049af67835cc629cd99051afe8a86ca7984e69d",
+      "size": 1505721
+    }
+  }
+}
