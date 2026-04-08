@@ -12,12 +12,25 @@ import { SlotPicker } from './base-affix/SlotPicker';
 
 interface BaseAffixSectionProps {
   selectedAffixes: readonly SelectedAffix[];
+  /** Single source of truth for the user's equipment slot selection —
+   *  shared directly with `SearchState.equipmentSlots`. This component
+   *  derives its single-select `selectedSlot` from the first element
+   *  (Set iteration is insertion-ordered per ES2015). Legacy URLs with
+   *  multiple slots degrade gracefully: only the first is visible as
+   *  active, but all of them continue to appear in the generated search
+   *  string until the user interacts with the picker, at which point
+   *  the set collapses to a singleton. */
+  equipmentSlots: ReadonlySet<EquipmentSlot>;
   /** Current global boolean operator from the parent's SearchState. Drives
    *  mode-aware validation (statOrderKey collisions and prefix/suffix count
    *  limits only fire in `&` mode) and the mode-aware subtitle above the
    *  Selected Affixes step. */
   globalOperator: ExpressionOperator;
   onSelectedAffixesChange: (next: readonly SelectedAffix[]) => void;
+  /** Replace the entire equipment-slots set in parent state. Called with
+   *  a singleton set when the user picks a slot, or an empty set when
+   *  they click the currently-active slot to deselect. */
+  onEquipmentSlotsChange: (next: ReadonlySet<EquipmentSlot>) => void;
 }
 
 /**
@@ -45,10 +58,20 @@ interface BaseAffixSectionProps {
  */
 export function BaseAffixSection({
   selectedAffixes,
+  equipmentSlots,
   globalOperator,
   onSelectedAffixesChange,
+  onEquipmentSlotsChange,
 }: BaseAffixSectionProps) {
-  const [selectedSlot, setSelectedSlot] = useState<EquipmentSlot | null>(null);
+  // Derive the single-select slot from the parent-owned Set. First element
+  // wins; null when empty. No local slot state — the parent is source of
+  // truth, which keeps the search string and the picker in lockstep with
+  // no risk of divergence.
+  const selectedSlot: EquipmentSlot | null = useMemo(() => {
+    const iter = equipmentSlots.values().next();
+    return iter.done === true ? null : iter.value;
+  }, [equipmentSlots]);
+
   const [selectedBaseName, setSelectedBaseName] = useState<string | null>(null);
 
   // Lazy-loaded affix DB feeds the validation pass. Until it resolves,
@@ -62,11 +85,24 @@ export function BaseAffixSection({
   );
   const conflictedIndices = useMemo(() => collectConflictedIndices(warnings), [warnings]);
 
-  const handleSlotChange = useCallback((slot: EquipmentSlot) => {
-    setSelectedSlot(slot);
-    // Note: BasePicker internally resets selectedBaseName on slot transition
-    // via its own useEffect. We don't need to reset it here.
-  }, []);
+  /** Click handler for slot buttons. Implements toggle semantics:
+   *   - Clicking a different slot replaces the set with a singleton of
+   *     the new slot.
+   *   - Clicking the currently-active slot deselects it (empty set).
+   *   - Any prior multi-slot legacy state collapses to the new
+   *     singleton on the first interaction.
+   *  BasePicker resets its own `selectedBaseName` on slot transition
+   *  via its internal useEffect, so we don't touch the base state here. */
+  const handleSlotChange = useCallback(
+    (slot: EquipmentSlot) => {
+      if (selectedSlot === slot) {
+        onEquipmentSlotsChange(new Set());
+      } else {
+        onEquipmentSlotsChange(new Set([slot]));
+      }
+    },
+    [selectedSlot, onEquipmentSlotsChange],
+  );
 
   const handleBaseChange = useCallback((name: string | null) => {
     setSelectedBaseName(name);

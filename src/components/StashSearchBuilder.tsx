@@ -2,7 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAffixDb } from '../data/affix-runtime';
 import { AFFIX_COUNT_MACROS, OPERATOR_OPTIONS } from '../data/stash-macros';
 import type { AffixDb, SelectedAffix } from '../types/affix';
-import type { AffixTier, MacroWithValue, Operator, SearchState } from '../types/stash-search';
+import type {
+  AffixTier,
+  EquipmentSlot,
+  MacroWithValue,
+  Operator,
+  SearchState,
+} from '../types/stash-search';
 import { affixToRegex } from '../utils/regex-generator';
 import {
   clearURLState,
@@ -17,7 +23,6 @@ import {
   BaseAffixSection,
   ClassRequirementsSection,
   CustomSearchSection,
-  EquipmentSlotsSection,
   ItemPotentialSection,
   ItemRaritySection,
   ItemTypesSection,
@@ -157,6 +162,17 @@ export const StashSearchBuilder = () => {
 
   const handleSelectedAffixesChange = useCallback((next: readonly SelectedAffix[]) => {
     setState((prev) => ({ ...prev, selectedAffixes: next }));
+  }, []);
+
+  /** Replace `state.equipmentSlots` wholesale. BaseAffixSection calls
+   *  this with a singleton set on pick, and an empty set on deselect —
+   *  both modes cover the full slot lifecycle now that the separate
+   *  multi-select EquipmentSlotsSection has been removed from the
+   *  layout. Wrapping a fresh `new Set()` around the input keeps the
+   *  stored reference under our control rather than aliasing whatever
+   *  the caller passed. */
+  const handleEquipmentSlotsChange = useCallback((next: ReadonlySet<EquipmentSlot>) => {
+    setState((prev) => ({ ...prev, equipmentSlots: new Set(next) }));
   }, []);
 
   const updateMacroWithValue = (
@@ -363,15 +379,12 @@ export const StashSearchBuilder = () => {
           </div>
         </div>
 
-        <EquipmentSlotsSection
-          equipmentSlots={state.equipmentSlots}
-          toggleSetItem={toggleSetItem}
-        />
-
         <BaseAffixSection
           selectedAffixes={state.selectedAffixes}
+          equipmentSlots={state.equipmentSlots}
           globalOperator={state.globalOperator}
           onSelectedAffixesChange={handleSelectedAffixesChange}
+          onEquipmentSlotsChange={handleEquipmentSlotsChange}
         />
 
         <CustomSearchSection
