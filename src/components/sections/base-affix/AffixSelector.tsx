@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useAffixDb } from '../../../data/affix-runtime';
 import type { ProcessedAffix, SelectedAffix } from '../../../types/affix';
 import type { EquipmentSlot } from '../../../types/stash-search';
+import { renderTierStatLine, tierValueColorClass } from '../../../utils/affix-display';
 import { compareAffixMatches, scoreAffixMatch } from '../../../utils/affix-search';
 import { AffixTierPicker } from './AffixTierPicker';
 
@@ -91,6 +92,7 @@ export function AffixSelector({ selectedSlot, selectedAffixes, onAddAffix }: Aff
                 <AffixRow
                   key={affix.id}
                   affix={affix}
+                  selectedSlot={selectedSlot}
                   disabled={selectedIdsOnSlot.has(affix.id)}
                   onAdd={onAddAffix}
                 />
@@ -109,6 +111,7 @@ export function AffixSelector({ selectedSlot, selectedAffixes, onAddAffix }: Aff
                 <AffixRow
                   key={affix.id}
                   affix={affix}
+                  selectedSlot={selectedSlot}
                   disabled={selectedIdsOnSlot.has(affix.id)}
                   onAdd={onAddAffix}
                 />
@@ -123,11 +126,15 @@ export function AffixSelector({ selectedSlot, selectedAffixes, onAddAffix }: Aff
 
 interface AffixRowProps {
   affix: ProcessedAffix;
+  /** Slot the parent is filtering by. Needed to resolve per-slot value
+   *  ranges in the stat preview, since the same affix can have
+   *  different numeric values on different slots. */
+  selectedSlot: EquipmentSlot;
   disabled: boolean;
   onAdd: (affixId: number, tier: number, exact: boolean) => void;
 }
 
-function AffixRow({ affix, disabled, onAdd }: AffixRowProps) {
+function AffixRow({ affix, selectedSlot, disabled, onAdd }: AffixRowProps) {
   const [selectedTier, setSelectedTier] = useState<number>(1);
   const [exact, setExact] = useState<boolean>(false);
 
@@ -139,6 +146,15 @@ function AffixRow({ affix, disabled, onAdd }: AffixRowProps) {
   const handleAdd = (): void => {
     onAdd(affix.id, selectedTier, exact);
   };
+
+  // Tokenized stat preview that reflects the currently picked tier's
+  // actual values on the current slot. Recomputed on every tier change
+  // via the row-local selectedTier state so the user sees T5 ranges
+  // when they pick T5 instead of the stale PoB T1 placeholder. The
+  // value-color tier threshold (T6+) picks up the LE "exalted" color
+  // convention — see tierValueColorClass docs.
+  const statTokens = renderTierStatLine(affix, selectedSlot, selectedTier);
+  const valueColorClass = tierValueColorClass(selectedTier);
 
   return (
     <div
@@ -153,7 +169,17 @@ function AffixRow({ affix, disabled, onAdd }: AffixRowProps) {
             <span className="ml-2 text-xs text-gray-400">{affix.nickname}</span>
           )}
         </div>
-        <div className="text-xs text-gray-400 truncate">{affix.statTemplate}</div>
+        <div className="text-xs text-gray-400 truncate">
+          {statTokens.map((token, i) =>
+            token.kind === 'value' ? (
+              <span key={i} className={valueColorClass}>
+                {token.text}
+              </span>
+            ) : (
+              <span key={i}>{token.text}</span>
+            ),
+          )}
+        </div>
       </div>
       <div className="flex-shrink-0">
         <AffixTierPicker
