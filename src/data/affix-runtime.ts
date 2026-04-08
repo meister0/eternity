@@ -24,7 +24,11 @@
 import { useEffect, useState } from 'react';
 import type { AffixDb, ProcessedAffix } from '../types/affix';
 
-const AFFIXES_URL = '/data/affixes.json';
+// Prepend Vite's resolved BASE_URL so the fetch works whether the app is
+// served at the root ('/') in tests/standalone or under the Astro `base`
+// config (e.g. '/eternity/' in dev and on GitHub Pages). `BASE_URL` is
+// guaranteed to end with a trailing slash by Vite.
+const AFFIXES_URL = `${import.meta.env.BASE_URL}data/affixes.json`;
 
 interface AffixesPayload {
   readonly _meta?: unknown;

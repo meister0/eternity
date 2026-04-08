@@ -26,7 +26,11 @@
 import { useEffect, useState } from 'react';
 import type { BaseDb, ProcessedBase } from '../types/affix';
 
-const BASES_URL = '/data/bases.json';
+// Prepend Vite's resolved BASE_URL so the fetch works whether the app is
+// served at the root ('/') in tests/standalone or under the Astro `base`
+// config (e.g. '/eternity/' in dev and on GitHub Pages). `BASE_URL` is
+// guaranteed to end with a trailing slash by Vite.
+const BASES_URL = `${import.meta.env.BASE_URL}data/bases.json`;
 
 interface BasesPayload {
   readonly _meta?: unknown;
