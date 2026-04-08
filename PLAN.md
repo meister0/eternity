@@ -34,15 +34,33 @@
 
 ---
 
-## 0.5. Status snapshot — 2026-04-08
+## 0.5. Status snapshot — 2026-04-09
 
 > **READ THIS FIRST.** §1-12 below are the original 2026-04-07 spec. Many of
 > their task descriptions reference schema fields and approaches that were
 > revised after empirical work. This section is the current source of truth.
+>
+> **Feature is functionally complete end-to-end.** Happy-path is working in
+> the dev browser: pick a slot → see filtered bases → browse affixes ranked
+> by relevance → add with tier → see mode-aware warnings → copy the stash
+> search string. Remaining work is polish (tooltips, saved builds, docs),
+> not correctness.
 
 ### What's done (commits, newest first)
 
 ```
+bfa0590  feat(affix-preview): tier-aware stat preview with LE tier colors
+04842cf  feat(affix-search): tier-based ranked search in AffixSelector
+7dc8961  refactor(ux): remove EquipmentSlotsSection, fold slot filter into SlotPicker
+894b9ac  refactor(ux): unify Base/Slot/Affix into one card with progressive disclosure
+edad6ef  fix(runtime): use Vite BASE_URL for data fetches
+ec50411  feat(P5.2): mode-aware validation warnings for selected affixes
+55fe958  feat(ux): show slot badge on SelectedAffixList chips
+7c8f383  feat(P4.2): wire BaseAffixSection + slot-aware SelectedAffix + URL format
+bf45dbf  feat(P3.5): BaseAffixSection wrapper composing Wave 3 components
+da6f4eb  feat(wave3): Phase 3 base/affix UI components (P3.1-P3.4)
+fc73ae2  fix(D7): canonicalize base.slot to EquipmentSlot vocabulary
+8dc0805  docs: PLAN.md §0.5 status snapshot for 2026-04-08 handoff
 0019554  fix: exclude minified data files from prettier on commit
 5456f5e  shrink affixes.json: minify JSON and drop tier displayText (-72% raw)
 3518be7  chore: lock vitest + @types/node devDependencies
@@ -55,38 +73,57 @@ a0c4ebc  canonicalize affix slot vocabulary into existing EquipmentSlot union
 5669e78  add base/affix search generator plan and gate raw data
 ```
 
-**Phase 0 (foundation) — DONE**, but heavily revised vs original §8 P0.x:
+**Test count:** 88/88 across 5 suites:
 
-- **P0.1** `scripts/update-data.mjs` — fetches PoB-LE files (`ModItem.json`, `bases-full.json`, `affixes-id-map.json`) AND Tunklab sitemap (`tunklab-sitemap.xml`); writes `data/raw/_meta.json` with sha256+size for each.
-- **P0.2** `scripts/process-data.mjs` — completely rewritten as a JOIN of PoB-LE + Tunklab cache. Tunklab is canonical for name/type/nickname/category/slots/per-slot tier values. PoB-LE provides only `statOrderKey` and per-tier `level`. Output minified.
-- **P0.3** `src/types/affix.ts` — new schema, see "Schema (current)" below.
-- **P0.4** `.github/workflows/update-data.yml` — full pipeline `update-data → install playwright-cli + Chromium → scrape-tunklab → process-data → peter-evans/create-pull-request`. Cron `0 6 * * 1`. `actions/cache` for Chromium binary. `timeout-minutes: 30`.
-- **P0.5** Tier indexing doc — folded into the rewritten §4 of this PLAN.md and the top-of-file comment of `process-data.mjs`.
+- `regex-generator.test.ts` — 23 (per-slot value scaling, hybrid affixes, T8 primordial)
+- `url-state.test.ts` — 10 (encode/decode round-trip, old-format rejection, slot validation)
+- `affix-validation.test.ts` — 19 (orphans, statOrderKey collisions, >2 prefix/suffix, mode-aware firing)
+- `affix-search.test.ts` — 20 (per-tier scoring, end-to-end ranking against real fixtures)
+- `affix-display.test.ts` — 16 (single/hybrid substitution, min===max collapse, slot/tier fallbacks, color class mapping)
 
-**Phase 1 (research + mapping) — DONE differently than planned:**
+**Phase 0 (foundation) — DONE**, heavily revised vs original §8 P0.x. Data pipeline built from scratch as a JOIN of PoB-LE + Tunklab:
 
-- **P1.1** Did not need a slot-only fallback. Verified empirically that Tunklab via headless browser gives full per-affix data (name, type, slot list, per-slot tier values, T8 primordial). PoB-LE network sandbox the original sub-agent hit was a sub-agent-only restriction; main session can fetch fine. See `docs/data-sources.md`.
-- **P1.2** Built `scripts/scrape-tunklab.mjs` (playwright-cli driver) instead of a static affix→slot map. Scrapes all 1112 Tunklab `/affix/<slug>` pages headlessly via the global `playwright-cli` binary, ~10 minutes. Writes `data/raw/tunklab-cache/<slug>.json` (gitignored). Resumable. The downstream `affix-slots.json` was rolled into `affixes.json` directly — there is no separate slots file.
+- **P0.1** `scripts/update-data.mjs` — fetches PoB-LE files (`ModItem.json`, `bases-full.json`, `affixes-id-map.json`) AND Tunklab sitemap. Writes `data/raw/_meta.json` with sha256+size for each.
+- **P0.2** `scripts/process-data.mjs` — JOIN of PoB-LE + Tunklab cache. Tunklab canonical for name/type/nickname/category/slots/per-slot tier values; PoB-LE provides `statOrderKey` + per-tier `level`. Output minified. `buildBaseDb` canonicalizes PoB-LE base slot vocabulary (`"Body Armor"`, `"One-Handed Sword"`, etc.) to the `EquipmentSlot` union; non-equipment bases (Lenses, Blessings) filtered out (626/897 kept after D7 fix).
+- **P0.3** `src/types/affix.ts` — current schema below.
+- **P0.4** `.github/workflows/update-data.yml` — weekly cron pipeline with Chromium caching.
+- **P0.5** Tier indexing doc — folded into §4 and `process-data.mjs` top-of-file comment.
 
-**Phase 2 (regex) — DONE**:
+**Phase 1 (research + mapping) — DONE**. `scripts/scrape-tunklab.mjs` (playwright-cli + headless Chromium) scrapes all 1112 Tunklab `/affix/<slug>` pages into gitignored `data/raw/tunklab-cache/`. Resumable, ~10 minutes cold. The planned `affix-slots.json` was rolled into `affixes.json` directly.
 
-- **P2.1** `src/utils/regex-generator.ts` — `affixToRegex(affix, slot, minTier, exact)`. `slot` is `EquipmentSlot` (REQUIRED). Supports T1-T8 including primordial. Per-slot value scaling works (Belt T8 ≠ Amulet T8 for affix 330). Hybrid affixes emit alternation across stat lines.
-- **P2.2** `src/utils/regex-generator.test.ts` — 23 vitest tests across 6 suites: rangeToRegex, fuseRanges, affixToRegex against live data, error cases, capped affixes, single-T1 affixes. Includes a critical assertion that Belt T8 and Amulet T8 regexes for affix 330 are NOT equal.
+**Phase 2 (regex core) — DONE**:
 
-**Phase 4 (state) — partially done**:
+- `src/utils/regex-generator.ts` — `affixToRegex(affix, slot, minTier, exact)`. `slot` REQUIRED. T1-T8 including primordial. Per-slot value scaling (Belt T8 ≠ Amulet T8 for affix 330). Hybrid affixes emit alternation.
+- Tests include a critical assertion that Belt T8 and Amulet T8 regexes for the same affix are NOT equal.
 
-- **P4.1** `SearchState.selectedAffixes: readonly SelectedAffix[]` ✓. URL `a=` param with compact `<id>:<tier><=|+>` format. Empty array omits the param. Round-trip verified. Updated: `src/types/stash-search.ts`, `src/utils/url-state.ts`, `src/utils/search-parser.ts` (dummy state).
-- **P4.3** `src/data/affix-runtime.ts` ✓. `loadAffixDb()` Promise with module-scope cache + in-flight dedup; `useAffixDb()` React hook returning `{data, loading, error}`. SSR-safe (no fetch at module load). Synchronous cache hit on second mount skips loading flash.
-- **P4.2** wire BaseAffixSection into StashSearchBuilder — **NOT DONE**. Blocked on Phase 3 UI components.
+**Phase 3 (UI components) — DONE**. All under `src/components/sections/base-affix/`:
 
-**Off-plan work that landed:**
+- **P3.1** `SlotPicker.tsx` — single-select, grouped buttons (Armor/Weapons/Off Hands/Idols). Headless (no SectionContainer — parent provides it).
+- **P3.2** `BasePicker.tsx` — filterable combobox. Uses `useRef` guard to prevent URL-hydrated `selectedBaseName` being clobbered on first paint.
+- **P3.3** `AffixSelector.tsx` + `AffixTierPicker.tsx` — slot-filtered affix list with inline tier picker. `AffixRow` subcomponent owns row-local tier/exact state. As of 04842cf and bfa0590: ranked search by relevance tiers AND tier-aware value preview with LE colors (T1-5 white, T6-8 fuchsia).
+- **P3.4** `SelectedAffixList.tsx` — chips with slot badge, inline tier editor (−/+/exact/Done), conflict ring highlight, loading/orphan/error states.
 
-- **T8 primordial baseline fix.** Original PLAN.md §4 was wrong: assumed 7 tiers, treated ModItem tier 0 as a synthetic baseline. User confirmed T8 primordial was added in the prior season. Verified empirically via Tunklab scrape: ModItem tier 0 = Game T1 (10-14% mana regen on Belt), ModItem tier 7 = Game T8 (94-110% on Belt — but 110-129% on Amulet, per-slot scaling is real). §4 fully rewritten.
-- **Schema migration to per-slot tiers.** `tiers[]` and `hasTierBreakdown` and `summaryText` are GONE from `ProcessedAffix`. Replaced with `perSlotTiers: Partial<Record<EquipmentSlot, ProcessedTier[]>>` and `slots: readonly EquipmentSlot[]` (derived from `Object.keys(perSlotTiers)`).
-- **Slot vocabulary canonicalization.** Tunklab uses TWO different slot vocabularies on a single affix detail page (long-form "One Handed Sword" in Applies To field vs short-form "1H Sword" in Scaled Values rows) plus an upstream typo ("One Handed Maces" plural). The processor canonicalizes both into the existing `EquipmentSlot` union (`'1HSword'`, `'1HMace'`, etc.) via `TUNKLAB_SLOT_CANONICAL` map. **No bridge module** — `EquipmentSlot` is canonical everywhere. The originally planned `slot-normalizer.ts` was dropped.
-- **Single source of truth for affix slots.** `slots` is derived from `Object.keys(perSlotTiers).sort()`, NOT from Tunklab's "Applies To" field. The two are out of sync for idol affixes (Tunklab has a real data quality bug there). Scaled Values rows are authoritative.
-- **Data minification.** `affixes.json` was 4.79 MB pretty / 99 KB brotli. After dropping `displayText` and emitting minified JSON: 1.33 MB raw / 66 KB brotli. `displayText` was derivable from `valueRanges` + `statTemplate` and was not consumed by regex-generator.
-- **`.prettierignore`** added to keep lint-staged from reformatting `public/data/*.json` back to pretty on commit.
+**Phase 4 (state integration) — DONE**:
+
+- **P4.1** `SearchState.selectedAffixes: readonly SelectedAffix[]` ✓. URL `a=` param.
+- **P4.2** `BaseAffixSection` wired into `StashSearchBuilder.tsx`. `generateSearchString(state, affixDb)` emits `T<n>&/regex/` fragment per SelectedAffix. Debounced URL update includes `state.selectedAffixes`.
+- **P4.3** `src/data/affix-runtime.ts` + `src/data/base-runtime.ts` ✓. Module-scope cache + in-flight dedup + SSR-safe React hooks.
+
+**Phase 5 — partial**:
+
+- **P5.2** Mode-aware validation warnings. `src/utils/affix-validation.ts` + `AffixWarnings.tsx` component. Rules: orphan affixIds (always), statOrderKey collisions within slot (AND only), >2 prefix/suffix per slot (AND only). Non-blocking. Conflicted chips get `ring-2 ring-amber-500/70`. Warning block has `role="status"` + `aria-live="polite"`.
+- **P5.1** tier tooltips — NOT DONE.
+- **P5.3** saved builds in localStorage — NOT DONE.
+
+**UX consolidation work that landed on top of the original plan:**
+
+- **Unified "Base & Affix Filter" card.** `BaseAffixSection` is one `SectionContainer` with four labelled sub-sections (SLOT / BASE / ADD AFFIX / SELECTED AFFIXES), separated by dividers. Progressive disclosure: steps 2-3 hide until a slot is picked; the Selected Affixes step is gated on `selectedAffixes.length > 0` (so URL-hydrated shared links show the selection even before the user picks a new slot). Validated against ui-ux-pro-max skill rules (`field-grouping`, `progressive-disclosure`, `empty-states`, `heading-hierarchy`).
+- **Headless sub-components.** SlotPicker, BasePicker, AffixSelector, SelectedAffixList all dropped their individual `SectionContainer`/`SectionHeader` wrappers — they're pure content bodies. Parent provides the one shared shell.
+- **`EquipmentSlotsSection` removed from layout** (commit 7dc8961). Its functionality folded into the unified SlotPicker: `state.equipmentSlots` is now the single source of truth, derived `selectedSlot` (first element) drives both the search-string macro AND the affix-picking context. Click-to-deselect (toggle on active slot). Legacy multi-slot URLs degrade gracefully — first click collapses to singleton. The `EquipmentSlotsSection.tsx` file is still on disk but unreferenced (orphan cleanup candidate).
+- **Ranked affix search (04842cf).** Replaced alphabetical substring match with 10-tier relevance scoring in `src/utils/affix-search.ts`. Tiers: exact name (1000) → exact nickname (800) → prefix name (600) → prefix nickname (500) → word-boundary in name (400) → word-boundary in nickname (300) → substring in name (200) → substring in nickname (150) → word-boundary in statTemplate (100) → substring in statTemplate (50). Ties broken alphabetically. Empty filter → plain alphabetical browse as before. "mana" on Amulet now ranks bare "Mana" first, then "Mana Regeneration", then "Level of All Skills and Added Mana".
+- **Tier-aware stat preview with LE colors (bfa0590).** `src/utils/affix-display.ts` exposes `renderTierStatLine(affix, slot, tier)` returning `{kind: 'text' | 'value', text}` tokens. The preview under the affix name now reflects the row-local `selectedTier` — tweak the inline tier picker to T5 and the preview updates to show T5 ranges. `tierValueColorClass(tier)` returns `text-gray-100 font-medium` for T1-T5 and `text-fuchsia-400 font-semibold` for T6-T8 (LE's exalted + primordial color convention). Only the numeric value changes color; the surrounding prose stays muted gray — per explicit user note.
+- **Slot badge on selected chips (55fe958).** Each chip shows a small pill with the human-readable slot label ("1H Sword", "Belt", etc.) so the same affix on two different slots is visually distinct.
+- **Breaking URL format.** `a=` param is `<id>:<slot>:<tier><=|+>` now. Legacy `<id>:<tier><=|+>` tokens are rejected via the strict regex and warn-logged. No production users existed when this landed.
 
 ### Schema (current — `src/types/affix.ts`)
 
@@ -119,6 +156,7 @@ interface ValueRange {
 
 interface SelectedAffix {
   affixId: number;
+  slot: EquipmentSlot; // REQUIRED — part of identity, drives per-slot regex values
   minTier: number; // 1..8
   exact: boolean; // true → only this tier; false → this tier or higher
 }
@@ -130,72 +168,80 @@ interface SelectedAffix {
 - 49 affixes capped at T7 (no primordial roll) — `maxTier === 7`
 - 420 affixes with single T1 only (special-category: altar, idol, sealed-only) — `maxTier === 1`
 
-### Architectural decisions locked in (beyond original §2)
+**Distribution in current `bases.json`** (626 after D7 canonicalization, down from 897 raw — 271 non-equipment bases like Lenses and Blessings dropped).
 
-| Decision                      | Choice                                                      | Why                                                                                                                                        |
-| ----------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Primary source for affix data | **Tunklab** via headless browser scrape                     | PoB-LE has known holes — `affix` field often null, `type` misclassified, predates T8 primordial                                            |
-| Secondary source              | PoB-LE ModItem.json                                         | Provides `statOrderKey` (mutual exclusion) and per-tier `level` (Tunklab only has aggregate)                                               |
-| Slot vocabulary               | Existing `EquipmentSlot` union                              | No bridge module needed; UI labels reuse `EQUIPMENT_SLOT_MACROS`                                                                           |
-| `slots` field source          | `Object.keys(perSlotTiers)` not Tunklab "Applies To"        | Single source of truth, avoids the Tunklab idol-data-quality bug                                                                           |
-| `affixes.json` shape          | Single merged file, minified                                | No separate `affix-slots.json`. Pretty-format excluded via `.prettierignore`                                                               |
-| Lazy loading                  | `fetch('/data/affixes.json')` in browser, NOT static import | Astro `public/` is served as static asset; static import would inline 1.33 MB into the JS bundle and bloat first paint                     |
-| `affixToRegex` slot parameter | REQUIRED, type `EquipmentSlot`                              | Per-slot value scaling is real — same affix has different ranges on different slots                                                        |
-| Scrape tooling                | global `playwright-cli` (drives Chromium headless)          | No `playwright` npm dep added; user has the binary installed globally; CI installs it via `npm install -g playwright-cli` + cached browser |
+### Architectural decisions locked in
+
+| Decision                      | Choice                                                                                                                            | Why                                                                                                                                                                                  |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Primary source for affix data | **Tunklab** via headless browser scrape                                                                                           | PoB-LE has known holes — `affix` field often null, `type` misclassified, predates T8 primordial                                                                                      |
+| Secondary source              | PoB-LE ModItem.json                                                                                                               | Provides `statOrderKey` (mutual exclusion) and per-tier `level` (Tunklab only has aggregate)                                                                                         |
+| Slot vocabulary               | Existing `EquipmentSlot` union                                                                                                    | No bridge module needed; UI labels reuse `EQUIPMENT_SLOT_MACROS`                                                                                                                     |
+| `slots` field source          | `Object.keys(perSlotTiers)` not Tunklab "Applies To"                                                                              | Single source of truth, avoids the Tunklab idol-data-quality bug                                                                                                                     |
+| `affixes.json` shape          | Single merged file, minified                                                                                                      | No separate `affix-slots.json`. Pretty-format excluded via `.prettierignore`                                                                                                         |
+| Lazy loading                  | `fetch(BASE_URL + 'data/*.json')` in browser                                                                                      | Astro `public/` is served as static asset; static import would inline 1.33 MB. `BASE_URL` prefix needed because Astro `base: '/eternity'`                                            |
+| `affixToRegex` slot parameter | REQUIRED, type `EquipmentSlot`                                                                                                    | Per-slot value scaling is real — same affix has different ranges on different slots                                                                                                  |
+| Scrape tooling                | global `playwright-cli` (drives Chromium headless)                                                                                | No `playwright` npm dep added; CI installs via `npm install -g playwright-cli` + cached browser                                                                                      |
+| Slot picker model             | **Single-select only.** `state.equipmentSlots` is a Set but the UI writes singletons. `selectedSlot` is derived, not local state. | Multi-select was broken for affix workflow (per-slot value scaling makes "Belt OR Amulet" impossible as one regex). Simpler mental model. Legacy multi-slot URLs degrade gracefully. |
+| Unified Base/Affix card       | One `SectionContainer` with progressive-disclosure steps                                                                          | Four stacked cards looked disconnected. `field-grouping` + `progressive-disclosure` from ui-ux-pro-max skill validated the consolidation.                                            |
+| Sub-component composition     | Headless (no own wrapper) — parent provides shell                                                                                 | shadcn-style Card + CardContent pattern. Only works because nothing else in the codebase consumes these components.                                                                  |
+| Selected affix identity key   | `(affixId, slot)` not `affixId` alone                                                                                             | Same affix on two slots is a distinct filter. Dedup scoped to current slot in AffixSelector.                                                                                         |
+| URL `a=` param format         | `<id>:<slot>:<tier><=                                                                                                             | +>`                                                                                                                                                                                  | Slot is load-bearing for regex generation. Breaking change from old format, accepted because no production users yet. |
+| Validation warnings           | Mode-aware: statOrderKey + prefix/suffix count rules fire only in AND. Orphans always.                                            | OR mode makes "mutually exclusive" and ">2 prefixes" legitimate patterns (find items with any of these). Ranked below real blockers.                                                 |
+| Affix search ordering         | Ranked by relevance tiers, not alphabetical                                                                                       | "mana" should surface "Mana Regeneration" above "Level of All Skills and Added Mana". User feedback, validated against real data.                                                    |
+| Tier value preview            | Reactive — recomputed per render from row-local tier                                                                              | Pure sync function, cheap to recompute. Premature memoization avoided.                                                                                                               |
+| Tier value color              | T1-T5 gray-100, T6-T8 fuchsia-400. Only the value, not prose                                                                      | LE in-game convention for exalted/primordial. Per explicit user instruction: value only, not whole name.                                                                             |
 
 ### Remaining work
 
-#### Phase 3 — UI components (parallelizable, no blockers)
+All blockers are cleared. Remaining work is polish and ship-readiness.
 
-All P3 components share the new shape: `useAffixDb()` for data, `EquipmentSlot` for slots, `selectedAffixes` state via setter callback to parent. Each component should use `EQUIPMENT_SLOT_MACROS` from `src/data/stash-macros.ts` for human-readable labels.
+#### Phase 5 — UX polish (remaining)
 
-- **P3.1** `SlotPicker.tsx` — single-select picker, fires `onSlotChange(slot: EquipmentSlot)`. Independent of others.
-- **P3.2** `BasePicker.tsx` — combobox of bases filtered by selected slot. **Blocked on D7** below.
-- **P3.3** `AffixSelector.tsx` + `AffixTierPicker.tsx` — list of affixes whose `slots` includes the selected slot, with inline tier picker. Uses `useAffixDb()`. Calls `onAddAffix(affixId, tier, exact)` on click. Capped affixes (`maxTier === 7`) must disable the T8 button. Single-T1 affixes (`maxTier === 1`) should render a fixed `T1` label instead of a picker.
-- **P3.4** `SelectedAffixList.tsx` — chips of `state.selectedAffixes`. Click to edit tier. × to remove. No data deps.
-- **P3.5** `BaseAffixSection.tsx` — wrapper, owns `selectedSlot`/`selectedBase`/`searchQuery` local state. Mounts on first render and triggers `useAffixDb()`. Depends on P3.1-P3.4.
+- **P5.1** Tier value tooltips (`TierTooltip.tsx` — may no longer need a separate file now that the row preview already shows per-tier values). **Reconsider whether this is still needed.** Original intent was to show `T<n>: +(<min> to <max>)<unit>` on hover; with the tier-aware row preview from bfa0590, hovering a tier button and seeing the preview update might be enough feedback. Could still add a hover-tooltip showing `level: N` (the required item level for that tier) since that's not currently shown anywhere.
+- **P5.3** Saved builds in localStorage. Create `SavedBuildsBar.tsx` + `src/utils/saved-builds.ts`. Named builds with load/save/delete/rename. Persist the entire `SearchState` (selectedAffixes + equipmentSlots + everything else). Should live in the sticky bottom bar next to the output.
 
-#### Phase 4 — State integration (1 task left)
+#### Phase 7 — Docs (ship-readiness requirement)
 
-- **P4.2** Wire `BaseAffixSection` into `StashSearchBuilder.tsx`. When `state.selectedAffixes` changes, generate one regex fragment per entry via `affixToRegex(affix, slot, minTier, exact)` and append to the search string output. Need to know which slot to pass — either:
-  - A) The affix is rolled to a base/slot the user picked in the BaseAffixSection (most natural)
-  - B) The user pre-selected an `EquipmentSlot` for each affix
-  - C) Default to the first slot in `affix.slots` (not ideal — Belt and Amulet have different ranges)
-  - **Recommended A**: each `SelectedAffix` carries an extra `slot: EquipmentSlot` field so the regex generation has context. Update `SelectedAffix` interface AND URL state encoding (`a=` param) to include slot — change from `<id>:<tier><=|+>` to `<id>:<slot>:<tier><=|+>` or similar. **This is a breaking change to URL format but no users yet, so safe.**
-
-#### Phase 5 — UX polish
-
-- **P5.1** Tier value tooltips (`TierTooltip.tsx`) — on hover/focus of a tier chip, show `T<n>: +(<min> to <max>)<unit>`. Build the display string from `tier.valueRanges` + the slot context. UI helper to make a "display string" since `displayText` was dropped.
-- **P5.2** Validation warnings — `statOrderKey` conflicts (two selected affixes with same statOrderKey), >2 prefixes, >2 suffixes, capped affix at T8 attempt, slot mismatch.
-- **P5.3** Saved builds in localStorage (`SavedBuildsBar.tsx`, `src/utils/saved-builds.ts`).
-
-#### Phase 7 — Docs
-
-- **P7** Update `README.md`, create `CONTRIBUTING.md`, update `CLAUDE.md`. **Attribution to Tunklab AND PoB-LE is required** — currently `docs/data-sources.md` is the only place that credits Tunklab.
+- **P7** Update `README.md` with feature description and screenshot. Create `CONTRIBUTING.md` with data update instructions. Update `CLAUDE.md` to reflect the current architecture. **Attribution to Tunklab AND PoB-LE is required** — right now only `docs/data-sources.md` credits them. Add attribution footer to the UI too (not just docs).
 
 #### Phase 7.1 — RU localization (post-MVP)
 
-Unchanged from original §8.
+Unchanged from original §8. Not blocking ship.
 
 ### Open technical debt
 
-- **D7 (BLOCKER for P3.2)**: `public/data/bases.json` `slot` field still uses PoB-LE vocabulary (`"Body Armor"`, `"One-Handed Sword"`, `"Off-Hand Catalyst"`) instead of `EquipmentSlot`. The processor's `buildBaseDb` does not run the `normalizeTunklabSlot` mapping. When wiring `BasePicker.tsx` (P3.2), the BasePicker filters bases by selected slot — and the JOIN will fail because `affixes` use EquipmentSlot but `bases` use PoB-LE form. Fix: extend `process-data.mjs` `buildBaseDb` to canonicalize `base.slot` through a similar map (PoB-LE → EquipmentSlot). The two vocabularies are similar but not identical (e.g. `"One-Handed Sword"` with hyphen vs Tunklab's `"One Handed Sword"` with space, both → `'1HSword'`).
+- **D7 — DONE** (commit fc73ae2). bases.json slot canonicalization landed. Kept here marked as done so the decision trail is preserved.
 - **D8**: Tunklab idol affix data quality bug — "Applies To" and "Scaled Values" disagree on which idol sub-types the affix rolls on. We trust Scaled Values rows (single source of truth via `Object.keys(perSlotTiers)`). Reportable to Tunk eventually but no action needed from us.
-- **D9**: `regex-generator` lowercases the entire stat verb before regex construction. LE stash search appears case-insensitive in practice so this is probably fine, but worth verifying with a real LE client test. Pre-existing observation from P2.2 agent.
-- **D10 (post-MVP)**: Tuple-encoding the perSlotTiers (Option C from the size discussion) would shrink `affixes.json` from 1.33 MB raw → ~453 KB raw — another 3x reduction. Requires another schema migration with new TypeScript types and helper accessors. Skip for now; revisit if parse-time on mobile becomes a real complaint.
+- **D9**: `regex-generator` lowercases the entire stat verb before regex construction. LE stash search appears case-insensitive in practice so this is probably fine, but worth verifying with a real LE client test.
+- **D10 (post-MVP)**: Tuple-encoding the perSlotTiers would shrink `affixes.json` from 1.33 MB raw → ~453 KB raw. Requires schema migration with new TS types and helper accessors. Skip for now; revisit if parse-time on mobile becomes a real complaint.
 - **D11 (post-MVP)**: Split `affixes.json` into `affixes-meta.json` (id, name, slots only — small) + per-affix detail loaded lazily on click. Trade requests for parse cost. Same "skip for now" treatment as D10.
+- **D12 (new, cleanup)**: `src/components/sections/EquipmentSlotsSection.tsx` is orphaned after 7dc8961 — removed from the layout, still exported from `sections/index.ts`. Either delete the file and its export, or keep it around as a reference in case the multi-select pattern returns in some other form. Quick cleanup candidate (~5 min).
+- **D13 (new, env)**: `npm run build` (Astro) requires Node ≥22.12. Dev machine has Node 20.19.2 as the default via nvm, but 24.13.0 is also installed. `npm run dev` works fine on 24 via `export PATH=...v24.13.0/bin:$PATH`. Document in README, or bump the default dev shell, or add `.nvmrc`.
+- **D14 (new, pre-existing lint)**: `src/utils/search-parser.ts:114` has an unused `macro` parameter warning from earlier session that never got fixed. Not in scope for any past task, easy to resolve next time that file is touched.
 
 ### Recommended next session start
 
 1. Read this §0.5 end to end + the file list at the top of §0.
-2. Verify state: `npm run typecheck && npm run test` (must be 23/23 green).
-3. Pick **D7** (bases.json slot canonicalization, ~30 min) as the warm-up — it's a small `buildBaseDb` patch + regenerate. Unblocks P3.2.
-4. Then dispatch Wave 3 in parallel agents: P3.1, P3.3, P3.4 are fully independent (no shared files), P3.2 waits on D7. P3.5 wraps them sequentially after.
-5. After Wave 3: P4.2 (sequential, depends on full P3 + P4.1 + P4.3) — note the URL-format breaking change for `SelectedAffix.slot`.
-6. Then Phase 5 polish.
-7. Finally Phase 7 docs + attribution.
+2. Verify state: `npm run typecheck && npx vitest run` (must be 88/88 green).
+3. **Start the dev server on Node 24** to visually verify before changing anything:
+   `export PATH="/Users/dmitrii/.nvm/versions/node/v24.13.0/bin:$PATH" && npm run dev`
+   URL: `http://localhost:4321/eternity`.
+4. Happy-path smoke test: pick a slot → add an affix → tweak its tier in the picker → verify the value in the preview updates and changes color at T6+ → add another affix → verify the search string in the bottom bar contains both regex fragments → click Share → open the URL in a new tab → verify state round-trips.
+5. **Pick the next task:**
+   - **D12 cleanup** (5 min warm-up) — delete orphan `EquipmentSlotsSection.tsx` + its export line.
+   - **P5.1 tier tooltips** (30-60 min) — reconsider scope first. Hover tooltip showing required item level is probably the minimum useful addition since the value preview is already reactive.
+   - **P5.3 saved builds** (~60-90 min) — localStorage CRUD, `SavedBuildsBar` in the sticky output bar, full `SearchState` serialization.
+   - **P7 docs** (~60 min) — README + CONTRIBUTING + CLAUDE.md update + UI attribution footer.
+6. Alternatively if the user reports any UX regression from visual testing → fix that first.
 
-**The 529 risk pattern** observed in this session: 4 sub-agent crashes from `API Error: 529 {"type":"overloaded_error"}`. Mitigation: dispatch in single-message parallel batches (one wave = one rate-limit hit), and verify partial work via `git diff` before re-dispatching — agents often write files before erroring out.
+### Useful operational patterns observed
+
+- **Dev server HMR + Node version.** Use `export PATH="/Users/dmitrii/.nvm/versions/node/v24.13.0/bin:$PATH"` before `npm run dev`. Typecheck and vitest run fine on the default Node 20; only Astro build/dev needs 22+.
+- **Prettier pre-commit hook reformats minor whitespace.** Expect the post-commit diff to sometimes have trivial formatting tweaks. Not a problem, just don't be surprised.
+- **Stale TypeScript diagnostics between Edit calls.** The language server sometimes shows errors that refer to lines that have already been changed. Always trust a fresh `npm run typecheck` over in-Edit diagnostic snapshots.
+- **529 overload mitigation** (from the prior wave-3 session): dispatch parallel sub-agents in one message. Verify partial work via `git diff` before re-dispatching if any agent errors out — they often write files before crashing.
+- **Browser cache after data URL fix.** When fixing the BASE_URL bug, browser may still cache the old 404s. Ctrl+Shift+R for hard reload.
 
 ---
 
