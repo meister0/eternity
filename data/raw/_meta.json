@@ -1,6 +1,7 @@
 {
-  "fetchedAt": "2026-04-07T12:16:29.176Z",
+  "fetchedAt": "2026-04-08T09:08:14.868Z",
   "source": "https://raw.githubusercontent.com/Musholic/PathOfBuildingForLastEpoch/master/src/Data",
+  "tunklab_source": "https://lastepoch.tunklab.com",
   "commitHash": "91ac61a0f982c2a0369a84a8cbeafe08b0882fb9",
   "files": {
     "affixes-id-map.json": {
@@ -14,6 +15,10 @@
     "ModItem.json": {
       "sha256": "f1eb63fe60892911ba95f058d049af67835cc629cd99051afe8a86ca7984e69d",
       "size": 1505721
+    },
+    "tunklab-sitemap.xml": {
+      "sha256": "c44275d5e1f78f6993d51590c661ce0ee11dc91bbe9e1dd81dd500a2d810ac7b",
+      "size": 340529
     }
   }
 }

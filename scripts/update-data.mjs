@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 // scripts/update-data.mjs
 //
-// Downloads upstream PoB-LE data files into data/raw/ and writes a
-// snapshot manifest (data/raw/_meta.json) with SHA-256 hashes and the
-// upstream commit hash. See PLAN.md §7.3 and §8 P0.1.
+// Downloads upstream data files into data/raw/ and writes a snapshot
+// manifest (data/raw/_meta.json) with SHA-256 hashes and the upstream
+// commit hash. See PLAN.md §7.3 and §8 P0.1.
+//
+// Files fetched:
+//   - ModItem.json          (PoB-LE: Musholic/PathOfBuildingForLastEpoch)
+//   - bases-full.json       (PoB-LE: Musholic/PathOfBuildingForLastEpoch)
+//   - affixes-id-map.json   (PoB-LE: Musholic/PathOfBuildingForLastEpoch)
+//   - tunklab-sitemap.xml   (Tunklab: lastepoch.tunklab.com/sitemap.xml)
 //
 // ESM only. Node 18+. No external dependencies.
 
@@ -23,9 +29,16 @@ const SOURCE_BASE =
 const COMMITS_API =
   'https://api.github.com/repos/Musholic/PathOfBuildingForLastEpoch/commits/master';
 
+const TUNKLAB_SOURCE = 'https://lastepoch.tunklab.com';
+
+// Tunklab is a public website; it responds to anonymous requests with a
+// normal browser UA. We keep the UA realistic to avoid looking like a bot.
+const TUNKLAB_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
+
 /**
  * List of files to download. `url` is fetched; bytes are written verbatim to
  * `<RAW_DIR>/<outName>` and accounted for under `outName` in _meta.json.
+ * Optional `headers` are passed through to fetch().
  */
 const FILES = [
   {
@@ -40,6 +53,11 @@ const FILES = [
     outName: 'affixes-id-map.json',
     url: `${SOURCE_BASE}/LEToolsImport/affixes.json`,
   },
+  {
+    outName: 'tunklab-sitemap.xml',
+    url: `${TUNKLAB_SOURCE}/sitemap.xml`,
+    headers: { 'User-Agent': TUNKLAB_USER_AGENT },
+  },
 ];
 
 /**
@@ -47,10 +65,12 @@ const FILES = [
  * responses or network failures.
  *
  * @param {string} url
+ * @param {Record<string, string>} [headers]
  * @returns {Promise<Buffer>}
  */
-async function fetchBuffer(url) {
-  const response = await fetch(url);
+async function fetchBuffer(url, headers) {
+  const init = headers ? { headers } : undefined;
+  const response = await fetch(url, init);
   if (!response.ok) {
     throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
   }
@@ -118,8 +138,8 @@ async function main() {
 
   // Download all files in parallel (they're independent).
   const downloads = await Promise.all(
-    FILES.map(async ({ outName, url }) => {
-      const buffer = await fetchBuffer(url);
+    FILES.map(async ({ outName, url, headers }) => {
+      const buffer = await fetchBuffer(url, headers);
       const outPath = path.join(RAW_DIR, outName);
       await writeFile(outPath, buffer);
       const hash = sha256Hex(buffer);
@@ -142,6 +162,7 @@ async function main() {
   const meta = {
     fetchedAt: new Date().toISOString(),
     source: SOURCE_BASE,
+    tunklab_source: TUNKLAB_SOURCE,
     commitHash,
     files,
   };

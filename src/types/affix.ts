@@ -1,12 +1,31 @@
 /**
  * Types for the affix database and selected-affix UI state.
- * Built from PoB-LE ModItem.json.
  *
- * Tier indexing: ModItem 1-7 → game T1-T7. ModItem tier 0 is synthetic
- * and dropped — see PLAN.md §4.
+ * Built by `scripts/process-data.mjs` as a JOIN of two upstream sources:
+ *  - Tunklab (https://lastepoch.tunklab.com) — primary canonical source for
+ *    name, type, nickname, category, slot list, per-slot tier values, class
+ *    requirement, and aggregate level requirement. Scraped via
+ *    `scripts/scrape-tunklab.mjs` into `data/raw/tunklab-cache/`.
+ *  - PoB-LE (Musholic/PathOfBuildingForLastEpoch) — secondary join partner
+ *    for `statOrderKey` (mutual-exclusion grouping) and per-tier `level`
+ *    requirement (Tunklab only has aggregate). Fetched by
+ *    `scripts/update-data.mjs` into `data/raw/`.
+ *
+ * Tier indexing: game tiers run T1..T8. T8 is the "primordial" top tier
+ * added in the prior season — drop-only and dramatically stronger than T7.
+ * See PLAN.md §4 for the full tier model and verification trail.
+ *
+ * Per-slot scaling: a single affix can have different value ranges on
+ * different slots. For example, affix 330 Mana Regeneration:
+ *   Belt T8   = 94..110%
+ *   Amulet T8 = 110..129%
+ * The regex generator MUST be told which slot the user is filtering for
+ * to produce the correct stash-search regex.
  */
 
 import type { EquipmentSlot } from './stash-search';
+
+export type AffixType = 'Prefix' | 'Suffix';
 
 export interface ValueRange {
   readonly min: number;
@@ -14,27 +33,51 @@ export interface ValueRange {
 }
 
 export interface ProcessedTier {
-  /** Game tier 1..7. ModItem tier 0 is dropped — see §4. */
+  /** Game tier 1..8. */
   readonly tier: number;
-  /** Display text with PoB markers like {rounding:Integer} stripped. */
+  /** Tunklab raw display text, e.g. "+(94% to 110%)". */
   readonly displayText: string;
+  /** Numeric range parsed from displayText. Hybrid affixes have one entry per stat line. */
   readonly valueRanges: readonly ValueRange[];
+  /** Per-tier required item level — from PoB-LE ModItem.json (Tunklab only has aggregate). */
   readonly level: number;
 }
 
-export type AffixType = 'Prefix' | 'Suffix';
+/** Map of slot name → tier list. Slot names match Tunklab's "Applies To" vocabulary
+ *  (e.g. "Belt", "Amulet", "One Handed Sword") which is NOT the same as the
+ *  EquipmentSlot union — the UI maps between them. */
+export type PerSlotTiers = Readonly<Record<string, readonly ProcessedTier[]>>;
 
 export interface ProcessedAffix {
   readonly id: number;
+  /** Canonical name from Tunklab, e.g. "Mana Regeneration". */
   readonly name: string;
+  /** Tunklab "Nickname" — short form, e.g. "Rejuvenating". May be null. */
+  readonly nickname: string | null;
+  /** From Tunklab. PoB-LE's `type` field is unreliable and ignored. */
   readonly type: AffixType;
-  /** Affix family ID — affixes sharing this are mutually exclusive on one item. */
+  /** Tunklab category, e.g. "Normal Affix" / "Set Affix". */
+  readonly category: string;
+  /** Affix family ID from PoB-LE ModItem.json. Affixes sharing this are
+   *  mutually exclusive on one item. */
   readonly statOrderKey: number;
-  /** False for the ~420 affixes with only ModItem tier 0 (no per-tier breakdown). */
-  readonly hasTierBreakdown: boolean;
-  readonly tiers: readonly ProcessedTier[];
-  /** Set when hasTierBreakdown=false: the raw text from the lone tier 0 entry. */
-  readonly summaryText?: string;
+  /** Class restrictions from Tunklab. Empty array = universal. */
+  readonly classRequirement: readonly string[];
+  /** Aggregate required character level from Tunklab. Null when unspecified. */
+  readonly levelRequirement: number | null;
+  /** Slot vocabulary from Tunklab "Applies To" field. */
+  readonly slots: readonly string[];
+  /** PoB-LE display text template for regex generation, e.g.
+   *  "(10-14)% increased Mana Regen". Hybrid affixes are joined with " / ".
+   *  PoB markers like {rounding:Integer} are stripped. The numeric placeholder
+   *  is in PoB-LE's "(min-max)" form, not Tunklab's "(min% to max%)" form.
+   *  Used by the regex generator as the source of the stat-name verb. */
+  readonly statTemplate: string;
+  /** Tier values per slot. Different slots may have different value ranges. */
+  readonly perSlotTiers: PerSlotTiers;
+  /** Highest tier present across all slots. Typically 8 (full progression),
+   *  7 (capped, no T8 primordial roll), or 1 (single-T1 special-category). */
+  readonly maxTier: number;
 }
 
 export interface ProcessedBase {
@@ -48,7 +91,7 @@ export interface ProcessedBase {
 
 export interface SelectedAffix {
   readonly affixId: number;
-  /** 1..7 */
+  /** 1..8 */
   readonly minTier: number;
   /** true → only this exact tier. false → this tier or higher. */
   readonly exact: boolean;

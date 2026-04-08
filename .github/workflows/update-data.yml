@@ -1,20 +1,31 @@
-# Update PoB-LE Data
+# Update Affix Data
 #
-# What this does: Re-downloads upstream affix/base data from
-# PathOfBuildingForLastEpoch, re-runs the local processor, and opens an
-# automated PR if anything changed (signal lives in data/raw/_meta.json
-# since data/raw/*.json is gitignored — see .gitignore).
+# What this does: re-downloads upstream affix/base data from PoB-LE and the
+# Tunklab sitemap, scrapes all 1112 Tunklab affix detail pages headlessly via
+# playwright-cli, re-runs the local processor (which JOINs both sources), and
+# opens an automated PR if anything changed.
+#
+# Pipeline:
+#   npm run update-data    -> data/raw/{ModItem.json,bases-full.json,
+#                                       affixes-id-map.json,tunklab-sitemap.xml,
+#                                       _meta.json}
+#   npm run scrape-tunklab -> data/raw/tunklab-cache/<slug>.json (gitignored,
+#                              ~1112 files, ~10 minutes)
+#   npm run process-data   -> public/data/{affixes,bases}.json
+#
+# Diff signal: data/raw/_meta.json (always tracked) and public/data/*.json
+# (always tracked). data/raw/*.json and tunklab-cache/ are gitignored.
 #
 # Schedule: every Monday at 06:00 UTC.
-# Manual trigger: GitHub Actions tab -> "Update PoB-LE Data" -> "Run workflow".
+# Manual trigger: GitHub Actions tab -> "Update Affix Data" -> "Run workflow".
 #
 # One-time setup: the `data-update` label referenced below must exist in the
 # repo. If the first run fails to apply the label, create it manually once in
 # the GitHub UI (Issues -> Labels -> New label) and re-run.
 #
-# Spec: see PLAN.md §7.2 (data refresh) and §8 P0.4 (this workflow).
+# Spec: see PLAN.md §7.2, §8 P0.4, and docs/data-sources.md.
 
-name: Update PoB-LE Data
+name: Update Affix Data
 
 on:
   schedule:
@@ -28,6 +39,7 @@ permissions:
 jobs:
   update-data:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,8 +53,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Download upstream PoB-LE data
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-v1
+
+      - name: Install playwright-cli + Chromium
+        run: |
+          npm install -g playwright-cli
+          npx playwright install --with-deps chromium
+
+      - name: Download upstream raw data (PoB-LE + Tunklab sitemap)
         run: npm run update-data
+
+      - name: Scrape Tunklab affix detail pages
+        run: npm run scrape-tunklab
 
       - name: Process raw data into public/data
         run: npm run process-data
@@ -50,16 +77,21 @@ jobs:
       - name: Open PR if data changed
         uses: peter-evans/create-pull-request@v6
         with:
-          commit-message: "chore(data): update affix dump from PoB-LE [auto]"
-          title: "chore(data): update affix dump from PoB-LE [auto]"
+          commit-message: "chore(data): update affix dump from PoB-LE + Tunklab [auto]"
+          title: "chore(data): update affix dump from PoB-LE + Tunklab [auto]"
           body: |
-            Automated update of PoB-LE affix and base data.
+            Automated weekly refresh of affix and base data.
 
-            **Source:** https://github.com/Musholic/PathOfBuildingForLastEpoch
+            **Sources:**
+            - PoB-LE: https://github.com/Musholic/PathOfBuildingForLastEpoch
+            - Tunklab: https://lastepoch.tunklab.com (scraped via playwright-cli)
+
             **Triggered:** ${{ github.event_name }}
             **Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-            See `data/raw/_meta.json` for the upstream commit hash and file hashes.
+            See `data/raw/_meta.json` for upstream file hashes and the PoB-LE
+            commit hash. The Tunklab cache (`data/raw/tunklab-cache/`) is
+            regenerated on every run and intentionally gitignored.
           branch: chore/data-update
           delete-branch: true
           labels: data-update

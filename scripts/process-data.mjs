@@ -1,58 +1,58 @@
 #!/usr/bin/env node
 // scripts/process-data.mjs
 //
-// Transforms data/raw/{ModItem,bases-full}.json into the processed shape
-// consumed by the UI: public/data/{affixes,bases}.json.
-//
-// Output shapes match src/types/affix.ts (AffixDb, BaseDb) exactly.
+// Transforms the raw upstream data into the processed shape consumed by the
+// UI: public/data/{affixes,bases}.json. Output matches src/types/affix.ts.
 //
 // =============================================================================
-// TIER INDEXING — READ BEFORE EDITING (see PLAN.md §4)
+// SOURCES — JOIN of PoB-LE and Tunklab (see PLAN.md §4 + docs/data-sources.md)
 // =============================================================================
-// PoB-LE's ModItem.json keys are "<affixId>_<tierIndex>" with tierIndex 0..7.
+// Primary source: TUNKLAB (https://lastepoch.tunklab.com)
+//   Scraped via `npm run scrape-tunklab` (uses playwright-cli + headless
+//   Chromium because Tier6-Tier8 columns are JS-hydrated and not in raw HTML).
+//   Output: data/raw/tunklab-cache/<slug>.json (gitignored, ~1112 files).
 //
-// Last Epoch now has 8 in-game tiers. T1..T7 are the pre-primordial tiers; T8
-// is the "primordial" top tier added in the prior season. ModItem's tier index
-// N maps DIRECTLY to Game tier (N+1) with a simple +1 shift:
+//   Tunklab is canonical for: name, nickname, type (Prefix/Suffix), category,
+//   classRequirement, levelRequirement (aggregate), slots ("Applies To"), and
+//   per-slot tier value tables (T1..T8 including the new T8 primordial tier).
 //
-//     ModItem tier 0 → Game T1
-//     ModItem tier 1 → Game T2
-//     ...
-//     ModItem tier 7 → Game T8 (primordial)
+//   Why Tunklab is primary: PoB-LE's ModItem.json has known holes — `affix`
+//   field is often null and `type` is misclassified (e.g. affix 330 Mana
+//   Regeneration which PoB-LE calls Suffix but the game treats as Prefix).
 //
-// There is NO synthetic baseline and NO entries are dropped. This was verified
-// empirically on 2026-04-08 by scraping Tunklab for affix 330 (Mana Regen):
+// Secondary source: POB-LE (Musholic/PathOfBuildingForLastEpoch)
+//   Fetched via `npm run update-data` from raw.githubusercontent.com.
+//   Provides: statOrderKey (mutual-exclusion grouping — Tunklab does not
+//   expose it) and per-tier `level` (Tunklab only has aggregate).
 //
-//     ModItem `330_0` ("(10-14)% increased Mana Regen")  == Tunklab T1 == Game T1
-//     ModItem `330_7` ("(94-110)% increased Mana Regen") == Tunklab T8 == Game T8
+// =============================================================================
+// TIER INDEXING — READ BEFORE EDITING (PLAN.md §4)
+// =============================================================================
+// PoB-LE keys are "<affixId>_<tierIndex>" with tierIndex 0..7. Tunklab columns
+// are labelled Tier1..Tier8. They line up with a +1 shift:
 //
-// Empirical distribution in ModItem.json:
+//     PoB-LE tier 0  ==  Tunklab Tier1  ==  Game T1
+//     PoB-LE tier 7  ==  Tunklab Tier8  ==  Game T8 (primordial)
 //
-//   - 1112 total affixes (every affix has at least a tier-0 entry → Game T1).
-//   -  643 affixes have all 8 tiers (ModItem 0..7 → Game T1..T8).
-//   -   49 affixes are capped at ModItem tier 6 (Game T7) — no primordial roll.
-//   -  420 affixes have ONLY ModItem tier 0 → a single Game T1 entry. These
-//     are formerly "summary-only" specials; they're now just single-tier
-//     affixes with `tiers.length === 1` and `hasTierBreakdown: true`.
+// Verified empirically 2026-04-08 by scraping affix 330 Mana Regeneration:
+//   - ModItem 330_0 = (10-14)% on Belt = Tunklab Tier1 = Game T1
+//   - ModItem 330_7 = (94-110)% on Belt = Tunklab Tier8 = Game T8 primordial
+//   - Amulet T8 = (110-129)% (per-slot scaling — Amulet rolls higher)
 //
-// Therefore:
-//   - Emit every ModItem entry with its game tier = (ModItem index + 1).
-//   - Output `tier` values are always in the inclusive range 1..8.
-//   - `hasTierBreakdown` is true for ALL affixes (kept for schema stability).
-//   - `summaryText` is dropped entirely — it is no longer needed.
+// Empirical distribution (1112 total affixes, perfect 1:1 PoB-LE↔Tunklab match):
 //
-// Historical context: an earlier version of this script assumed ModItem tier 0
-// was a synthetic baseline and dropped it for affixes that had tier 1+ entries.
-// That was wrong — it silently lost Game T1 for all 692 normal affixes.
+//   - 643 affixes have full T1-T8 progression
+//   -  49 affixes are capped at T7 (no primordial roll)
+//   - 420 affixes have a single T1 only — special-category specials
+//     (altar/idol/sealed-only/etc.)
 //
 // Beware: PoB-LE `src/Classes/Item.lua:348` contains an off-by-one bug that
-// classifies tier index >= 5 as "exalted". Prior to primordial, game exalted
-// was T6+ (so PoB was off by one). With the T8 primordial tier added, that
+// classifies tier index >= 5 as "exalted". With T8 primordial added, that
 // bug is now effectively off by TWO tiers — PoB-LE predates primordial.
 // DO NOT propagate PoB's indexing mistake here.
 // =============================================================================
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -130,85 +130,167 @@ async function readJson(filePath) {
  * @param {string} text
  * @returns {string}
  */
-function stripMarkers(text) {
+function stripPobMarkers(text) {
   return text.replace(/\{[^}]+\}/g, '');
 }
 
 /**
- * Combine "1" and "2" fields into a single display string with " / " between.
- * Applies marker stripping.
+ * Combine PoB-LE "1" and "2" stat-line fields into a single template string
+ * with " / " between, with markers stripped. Used to populate ProcessedAffix
+ * `statTemplate`, the source of the stat-name verb for regex generation.
+ *
  * @param {string | undefined | null} first
  * @param {string | undefined | null} second
  * @returns {string}
  */
-function buildDisplayText(first, second) {
+function buildStatTemplate(first, second) {
   const parts = [];
-  if (typeof first === 'string' && first.length > 0) parts.push(stripMarkers(first));
-  if (typeof second === 'string' && second.length > 0) parts.push(stripMarkers(second));
+  if (typeof first === 'string' && first.length > 0) parts.push(stripPobMarkers(first));
+  if (typeof second === 'string' && second.length > 0) parts.push(stripPobMarkers(second));
   return parts.join(' / ').trim();
 }
 
+// ---------------------------------------------------------------------------
+// Tunklab cache loader & per-affix parsers
+// ---------------------------------------------------------------------------
+
 /**
- * Parse all (min-max) numeric ranges out of a string. Returns them as
- * {min, max} objects in the order they appear.
- * @param {string} source
- * @returns {Array<{min: number, max: number}>}
+ * Load every JSON file in `data/raw/tunklab-cache/` into a Map keyed by the
+ * stringified affix ID found inside each record's `data.meta.ID` field.
+ * Throws if the directory is missing or has fewer than 1000 valid records.
+ *
+ * @param {string} cacheDir
+ * @returns {Promise<Map<string, object>>}
  */
-function parseValueRanges(source) {
-  const ranges = [];
-  const pattern = /\(([\d.]+)-([\d.]+)\)/g;
-  let match;
-  while ((match = pattern.exec(source)) !== null) {
-    const min = Number(match[1]);
-    const max = Number(match[2]);
-    if (Number.isFinite(min) && Number.isFinite(max)) {
-      ranges.push({ min, max });
+async function loadTunklabCache(cacheDir) {
+  let fileNames;
+  try {
+    fileNames = await readdir(cacheDir);
+  } catch {
+    throw new Error(
+      `Tunklab cache directory not found at ${cacheDir}. ` +
+        `Run \`npm run scrape-tunklab\` first.`,
+    );
+  }
+  const map = new Map();
+  for (const fname of fileNames) {
+    if (!fname.endsWith('.json')) continue;
+    const text = await readFile(path.join(cacheDir, fname), 'utf8');
+    const record = JSON.parse(text);
+    if (record?.ok && record?.data?.meta?.ID) {
+      map.set(String(record.data.meta.ID), record);
     }
   }
-  return ranges;
+  if (map.size < 1000) {
+    throw new Error(
+      `Tunklab cache has only ${map.size} valid records (expected ~1112). ` +
+        `Run \`npm run scrape-tunklab\` to refresh.`,
+    );
+  }
+  return map;
 }
 
 /**
- * Fallback for single-value tiers like "+5% Void Penetration" — pick the first
- * signed number out of the stripped text and emit it as a degenerate range.
- * Returns null if no numeric value is parseable.
- * @param {string} strippedText
- * @returns {{min: number, max: number} | null}
+ * Split Tunklab's "Class requirement" field. Tunklab concatenates multi-class
+ * strings with no separator, e.g. "MagePrimalistNon-Specific". We split on
+ * lowercase→uppercase transitions, then post-process so that "Non-Specific"
+ * (which contains an internal hyphen and capital N) stays joined.
+ *
+ * @param {string | null | undefined} raw
+ * @returns {string[]}
  */
-function parseBareNumber(strippedText) {
-  const match = strippedText.match(/-?\d+(?:\.\d+)?/);
-  if (!match) return null;
-  const value = Number(match[0]);
-  if (!Number.isFinite(value)) return null;
-  return { min: value, max: value };
+function parseClassRequirement(raw) {
+  if (typeof raw !== 'string') return [];
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  // Insert split markers at lowercase→uppercase transitions.
+  const marked = trimmed.replace(/([a-z])([A-Z])/g, '$1\u0001$2');
+  return marked
+    .split('\u0001')
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 /**
- * Build value ranges for a single ModItem tier entry. Combines "1" and "2"
- * fields so that hybrid affixes whose numeric data lives in "2" still get
- * captured. Falls back to a bare-number extraction when no (min-max) pattern
- * is present. Logs to stderr when even the fallback fails.
- * @param {{[key: string]: unknown}} entry
- * @param {string} affixId
+ * Parse Tunklab's aggregate "Level requirement" field into a number, or null
+ * when absent. Tunklab values look like "25" or sometimes embed extra text.
+ *
+ * @param {string | null | undefined} raw
+ * @returns {number | null}
+ */
+function parseLevelRequirement(raw) {
+  if (typeof raw !== 'string') return null;
+  const m = raw.match(/(\d+)/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isInteger(n) ? n : null;
+}
+
+/**
+ * Split Tunklab's "Applies To" field on newlines. The scraper preserves the
+ * inner-text newlines between slot names, so this is a simple split.
+ *
+ * @param {string | null | undefined} raw
+ * @returns {string[]}
+ */
+function splitTunklabSlots(raw) {
+  if (typeof raw !== 'string') return [];
+  return raw
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Parse a Tunklab tier value cell into one or more numeric ranges. Multi-stat
+ * (hybrid) affixes have one cell containing two stat lines separated by `\n`,
+ * each with its own range. We return them in cell order so they line up with
+ * the " / "-split stat lines in `statTemplate`.
+ *
+ * Examples:
+ *   "+(10% to 14%)"                    → [{ min: 10,  max: 14 }]
+ *   "+5%"                               → [{ min: 5,   max: 5  }]
+ *   "-(5 to 3)%"                        → [{ min: -5,  max: -3 }]
+ *   "+(205 to 243)\n+(40 to 50)"        → [{ min: 205, max: 243 }, { min: 40, max: 50 }]
+ *
+ * @param {string | null | undefined} cell
  * @returns {Array<{min: number, max: number}>}
  */
-function extractValueRanges(entry, affixId) {
-  const firstRaw = typeof entry['1'] === 'string' ? entry['1'] : '';
-  const secondRaw = typeof entry['2'] === 'string' ? entry['2'] : '';
-  const combinedOriginal = [firstRaw, secondRaw].filter((s) => s.length > 0).join(' / ');
+function parseTunklabValueRanges(cell) {
+  if (typeof cell !== 'string' || cell.length === 0) return [];
+  const lines = cell
+    .split(/\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const out = [];
+  for (const line of lines) {
+    const rangeMatch = line.match(
+      /([-+]?)\(\s*([-+]?\d+(?:\.\d+)?)\s*%?\s*to\s*([-+]?\d+(?:\.\d+)?)\s*%?\s*\)/,
+    );
+    if (rangeMatch) {
+      const sign = rangeMatch[1] === '-' ? -1 : 1;
+      out.push({
+        min: sign * parseFloat(rangeMatch[2]),
+        max: sign * parseFloat(rangeMatch[3]),
+      });
+      continue;
+    }
+    const singleMatch = line.match(/([-+]?\d+(?:\.\d+)?)/);
+    if (singleMatch) {
+      const n = parseFloat(singleMatch[1]);
+      out.push({ min: n, max: n });
+    }
+  }
+  return out;
+}
 
-  const ranges = parseValueRanges(combinedOriginal);
-  if (ranges.length > 0) return ranges;
-
-  const stripped = stripMarkers(combinedOriginal);
-  const bare = parseBareNumber(stripped);
-  if (bare !== null) return [bare];
-
-  console.warn(
-    `warn: affix ${affixId} tier ${entry.tier} has no parseable numeric value ` +
-      `(text: ${JSON.stringify(combinedOriginal)})`,
-  );
-  return [];
+/**
+ * Count "TierN" columns in a Tunklab Scaled Values headers row.
+ * @param {readonly string[]} headers
+ * @returns {number}
+ */
+function countTunklabTierColumns(headers) {
+  return headers.filter((h) => /^Tier\d+$/.test(h)).length;
 }
 
 /**
@@ -248,76 +330,149 @@ function groupEntriesByAffix(modItem) {
 }
 
 /**
- * Build a ProcessedAffix for a single affix ID given all its tier entries.
- * ModItem tier index N (0..7) maps directly to Game tier (N+1) (1..8). No
- * entries are dropped; every collected entry is emitted.
+ * Build a ProcessedAffix by JOINing PoB-LE ModItem tier entries (for
+ * statOrderKey and per-tier `level`) with the Tunklab cache record (for name,
+ * nickname, type, category, slots, per-slot tier values, class requirement,
+ * and aggregate level requirement).
+ *
+ * Tier mapping: ModItem tier index N (0..7) → Game tier (N+1) (1..8). Tunklab
+ * "TierN" columns line up the same way (Tunklab Tier1 = ModItem 0 = Game T1).
+ *
+ * Throws if the Tunklab cache record is missing or malformed for this affix.
+ *
  * @param {string} affixId
- * @param {Map<number, RawModItemEntry>} tierMap
+ * @param {Map<number, RawModItemEntry>} modItemTierMap
+ * @param {object} tunklabRecord
  * @returns {object}
  */
-function buildProcessedAffix(affixId, tierMap) {
-  const idNum = Number(affixId);
-  const sortedTierIndexes = [...tierMap.keys()].sort((a, b) => a - b);
+function buildProcessedAffix(affixId, modItemTierMap, tunklabRecord) {
+  const meta = tunklabRecord?.data?.meta;
+  const scaled = tunklabRecord?.data?.scaled;
+  if (!meta) {
+    throw new Error(`affix ${affixId}: Tunklab record has no meta block`);
+  }
+  const idFromTunklab = parseInt(meta.ID, 10);
+  if (idFromTunklab !== Number(affixId)) {
+    throw new Error(
+      `affix ${affixId}: Tunklab record ID ${meta.ID} does not match PoB-LE affix ID`,
+    );
+  }
 
-  // Reference entry for stable metadata (name, type, statOrderKey). Use the
-  // lowest-index entry — every affix has at least one, and values identical
-  // across tiers (affix name/type/statOrderKey never vary per tier).
-  const reference = tierMap.get(sortedTierIndexes[0]);
-  const name = typeof reference.affix === 'string' ? reference.affix : '';
-  const type = reference.type === 'Prefix' ? 'Prefix' : 'Suffix';
+  // Tunklab is canonical for these fields.
+  const name = (meta.Name ?? '').trim();
+  const nickname = (meta.Nickname ?? '').trim() || null;
+  const type = meta.Type === 'Suffix' ? 'Suffix' : 'Prefix';
+  const category = (meta.Category ?? '').trim();
+  const classRequirement = parseClassRequirement(meta['Class requirement']);
+  const levelRequirement = parseLevelRequirement(meta['Level requirement']);
+  const slots = splitTunklabSlots(meta['Applies To']);
+
+  // PoB-LE provides statOrderKey + per-tier level (Tunklab only has aggregate)
+  // and the canonical stat-name template for regex generation.
+  const sortedModItemTiers = [...modItemTierMap.keys()].sort((a, b) => a - b);
+  const reference = modItemTierMap.get(sortedModItemTiers[0]);
   const statOrderKey = Number(reference.statOrderKey);
+  const statTemplate = buildStatTemplate(reference['1'], reference['2']);
 
-  const tiers = sortedTierIndexes.map((tierIndex) => {
-    const entry = tierMap.get(tierIndex);
-    const displayText = buildDisplayText(entry['1'], entry['2']);
-    const valueRanges = extractValueRanges(entry, affixId);
-    const level = Number.isFinite(entry.level) ? Number(entry.level) : 0;
-    return {
-      tier: tierIndex + 1, // ModItem index → Game tier (1..8).
-      displayText,
-      valueRanges,
-      level,
-    };
-  });
+  // Map game tier → required level. ModItem tier index N == Game tier (N+1).
+  /** @type {Record<number, number>} */
+  const levelByGameTier = {};
+  for (const [tierIdx, entry] of modItemTierMap) {
+    const gameTier = tierIdx + 1;
+    levelByGameTier[gameTier] = Number.isFinite(entry.level) ? Number(entry.level) : 0;
+  }
+
+  // Build per-slot tier tables from Tunklab Scaled Values.
+  /** @type {Record<string, Array<{tier: number, displayText: string, valueRanges: Array<{min:number,max:number}>, level: number}>>} */
+  const perSlotTiers = {};
+  let maxTier = 0;
+
+  if (scaled?.headers && Array.isArray(scaled.rows)) {
+    const tierCount = countTunklabTierColumns(scaled.headers);
+    for (const row of scaled.rows) {
+      const slotName = row.slot;
+      if (!slotName || tierCount === 0) continue;
+      // The scraper kept the leading slot column in row.tiers (since it
+      // collected all <td>s); the LAST `tierCount` elements of row.tiers
+      // are the actual TierN value cells. Anything before that is the
+      // optional "Modifier" column we don't care about.
+      const tierValues = row.tiers.slice(row.tiers.length - tierCount);
+      const tiers = [];
+      for (let i = 0; i < tierValues.length; i++) {
+        const cell = tierValues[i];
+        const ranges = parseTunklabValueRanges(cell);
+        if (ranges.length === 0) continue;
+        const gameTier = i + 1;
+        tiers.push({
+          tier: gameTier,
+          displayText: cell,
+          valueRanges: ranges,
+          level: levelByGameTier[gameTier] ?? 0,
+        });
+        if (gameTier > maxTier) maxTier = gameTier;
+      }
+      if (tiers.length > 0) {
+        perSlotTiers[slotName] = tiers;
+      }
+    }
+  }
 
   return {
-    id: idNum,
+    id: idFromTunklab,
     name,
+    nickname,
     type,
+    category,
     statOrderKey,
-    hasTierBreakdown: true,
-    tiers,
+    classRequirement,
+    levelRequirement,
+    slots,
+    statTemplate,
+    perSlotTiers,
+    maxTier,
   };
 }
 
 /**
- * Build the full AffixDb keyed by string affix ID.
+ * Build the full AffixDb keyed by string affix ID by JOINing PoB-LE ModItem
+ * entries with the Tunklab cache. Affixes missing from the Tunklab cache are
+ * skipped with a warning (should not happen — verified 1112↔1112 1:1).
+ *
  * @param {Record<string, RawModItemEntry>} modItem
- * @returns {{affixes: Record<string, object>, stats: {total: number, fullEight: number, cappedSeven: number, singleOne: number}}}
+ * @param {Map<string, object>} tunklabCache
+ * @returns {{affixes: Record<string, object>, stats: {total: number, processed: number, fullEight: number, cappedSeven: number, singleOne: number, other: number}}}
  */
-function buildAffixDb(modItem) {
+function buildAffixDb(modItem, tunklabCache) {
   const grouped = groupEntriesByAffix(modItem);
   const affixes = {};
   let fullEight = 0;
   let cappedSeven = 0;
   let singleOne = 0;
+  let other = 0;
 
   for (const [affixId, tierMap] of grouped) {
-    const processed = buildProcessedAffix(affixId, tierMap);
+    const tunklabRecord = tunklabCache.get(affixId);
+    if (!tunklabRecord) {
+      console.warn(`warn: affix ${affixId} has no Tunklab cache record — skipped`);
+      continue;
+    }
+    const processed = buildProcessedAffix(affixId, tierMap, tunklabRecord);
     affixes[affixId] = processed;
-    const len = processed.tiers.length;
-    if (len === 8) fullEight++;
-    else if (len === 7) cappedSeven++;
-    else if (len === 1) singleOne++;
+    if (processed.maxTier === 8) fullEight++;
+    else if (processed.maxTier === 7) cappedSeven++;
+    else if (processed.maxTier === 1) singleOne++;
+    else other++;
   }
 
   return {
     affixes,
     stats: {
       total: grouped.size,
+      processed: Object.keys(affixes).length,
       fullEight,
       cappedSeven,
       singleOne,
+      other,
     },
   };
 }
@@ -396,101 +551,127 @@ function assert(condition, message) {
 }
 
 /**
- * Run the spot-check validations required by the 8-tier model (PLAN.md §4).
- * @param {{affixes: Record<string, object>, stats: {total: number, fullEight: number, cappedSeven: number, singleOne: number}}} built
+ * Run the spot-check validations required by the merged Tunklab + PoB-LE
+ * shape (PLAN.md §4).
+ * @param {{affixes: Record<string, object>, stats: {total: number, processed: number, fullEight: number, cappedSeven: number, singleOne: number, other: number}}} built
  */
 function validateAffixes(built) {
   const { affixes, stats } = built;
 
-  // Spot-check: affix 330 (Rejuvenating / Mana Regen). Verified against Tunklab
-  // 2026-04-08 — ModItem 330_0 == Game T1 (10-14%), ModItem 330_7 == Game T8 (94-110%).
+  // Spot-check: affix 330 (Mana Regeneration / Rejuvenating). Verified against
+  // Tunklab 2026-04-08:
+  //   - Tunklab Name: "Mana Regeneration", Type: Prefix
+  //     (PoB-LE wrongly says "Rejuvenating" / "Suffix")
+  //   - Belt T1 = (10-14)%, Belt T8 = (94-110)%
+  //   - Amulet T8 = (110-129)% (per-slot scaling)
   const a330 = affixes['330'];
   assert(a330, 'affix 330 missing');
-  assert(a330.name === 'Rejuvenating', `affix 330 name = ${a330.name}`);
-  assert(a330.type === 'Suffix', `affix 330 type = ${a330.type}`);
-  assert(a330.hasTierBreakdown === true, `affix 330 hasTierBreakdown = ${a330.hasTierBreakdown}`);
-  assert(a330.tiers.length === 8, `affix 330 tiers.length = ${a330.tiers.length} (expected 8)`);
+  assert(
+    a330.name === 'Mana Regeneration',
+    `affix 330 name = ${a330.name} (expected "Mana Regeneration")`,
+  );
+  assert(
+    a330.nickname === 'Rejuvenating',
+    `affix 330 nickname = ${a330.nickname} (expected "Rejuvenating")`,
+  );
+  assert(
+    a330.type === 'Prefix',
+    `affix 330 type = ${a330.type} (Tunklab says Prefix; PoB-LE wrongly says Suffix)`,
+  );
+  assert(a330.statOrderKey === 330, `affix 330 statOrderKey = ${a330.statOrderKey}`);
+  assert(
+    Array.isArray(a330.slots) && a330.slots.includes('Belt') && a330.slots.includes('Amulet'),
+    `affix 330 slots = ${JSON.stringify(a330.slots)}`,
+  );
+  assert(a330.maxTier === 8, `affix 330 maxTier = ${a330.maxTier} (expected 8)`);
 
-  const a330T1 = a330.tiers[0];
-  assert(a330T1.tier === 1, `affix 330 tiers[0].tier = ${a330T1.tier} (expected 1)`);
+  const beltTiers = a330.perSlotTiers.Belt;
+  assert(beltTiers, 'affix 330 has no Belt perSlotTiers');
+  assert(beltTiers.length === 8, `affix 330 Belt tier count = ${beltTiers.length} (expected 8)`);
+  const beltT1 = beltTiers[0];
+  const beltT8 = beltTiers[7];
   assert(
-    a330T1.valueRanges.length === 1 &&
-      a330T1.valueRanges[0].min === 10 &&
-      a330T1.valueRanges[0].max === 14,
-    `affix 330 tier 1 valueRanges = ${JSON.stringify(a330T1.valueRanges)}`,
+    beltT1.tier === 1 && beltT1.valueRanges[0].min === 10 && beltT1.valueRanges[0].max === 14,
+    `affix 330 Belt T1 = ${JSON.stringify(beltT1)}`,
   );
   assert(
-    a330T1.displayText.includes('(10-14)% increased Mana Regen'),
-    `affix 330 tier 1 displayText = ${JSON.stringify(a330T1.displayText)}`,
+    beltT8.tier === 8 && beltT8.valueRanges[0].min === 94 && beltT8.valueRanges[0].max === 110,
+    `affix 330 Belt T8 = ${JSON.stringify(beltT8)}`,
+  );
+  // Per-tier level joined from PoB-LE.
+  assert(typeof beltT1.level === 'number', `affix 330 Belt T1.level missing`);
+
+  const amuletT8 = a330.perSlotTiers.Amulet[a330.perSlotTiers.Amulet.length - 1];
+  assert(
+    amuletT8.tier === 8 &&
+      amuletT8.valueRanges[0].min === 110 &&
+      amuletT8.valueRanges[0].max === 129,
+    `affix 330 Amulet T8 = ${JSON.stringify(amuletT8)} (expected min=110, max=129)`,
   );
 
-  const a330T8 = a330.tiers[7];
-  assert(a330T8.tier === 8, `affix 330 tiers[7].tier = ${a330T8.tier} (expected 8)`);
-  assert(
-    a330T8.valueRanges.length === 1 &&
-      a330T8.valueRanges[0].min === 94 &&
-      a330T8.valueRanges[0].max === 110,
-    `affix 330 tier 8 valueRanges = ${JSON.stringify(a330T8.valueRanges)}`,
-  );
-  assert(
-    a330T8.displayText.includes('(94-110)% increased Mana Regen'),
-    `affix 330 tier 8 displayText = ${JSON.stringify(a330T8.displayText)}`,
-  );
-  assert(
-    !a330T8.displayText.includes('{rounding'),
-    `affix 330 tier 8 displayText still contains PoB marker: ${JSON.stringify(a330T8.displayText)}`,
-  );
-
-  // Spot-check: affix 0 (Inevitable / Void Penetration).
+  // Spot-check: affix 0 (Inevitable / Void Penetration) — should also be 8 tiers.
   const a0 = affixes['0'];
   assert(a0, 'affix 0 missing');
-  assert(a0.name === 'Inevitable', `affix 0 name = ${a0.name}`);
-  assert(a0.tiers.length === 8, `affix 0 tiers.length = ${a0.tiers.length} (expected 8)`);
-  assert(a0.tiers[7].tier === 8, `affix 0 tiers[7].tier = ${a0.tiers[7].tier} (expected 8)`);
+  assert(a0.maxTier === 8, `affix 0 maxTier = ${a0.maxTier} (expected 8)`);
 
-  // Count sanity — expecting ~1112 total.
+  // Aggregate sanity — expecting ~1112 total.
   assert(
     stats.total >= 1000 && stats.total <= 1300,
     `total affix count out of range: ${stats.total}`,
   );
-  assert(
-    stats.fullEight >= 600,
-    `expected >= 600 affixes with full T1-T8 progression, got ${stats.fullEight}`,
-  );
+  assert(stats.processed >= 1000, `processed affix count too low: ${stats.processed}`);
+  assert(stats.fullEight >= 600, `expected >= 600 affixes with full T1-T8, got ${stats.fullEight}`);
   assert(stats.cappedSeven >= 40, `expected >= 40 affixes capped at T7, got ${stats.cappedSeven}`);
   assert(stats.singleOne >= 300, `expected >= 300 single-T1 affixes, got ${stats.singleOne}`);
 
-  // Every affix must have at least one tier, hasTierBreakdown always true,
-  // no summaryText field, and all tier indexes in 1..8 and strictly ascending.
+  // Per-affix invariants.
   for (const [id, affix] of Object.entries(affixes)) {
-    assert(affix.hasTierBreakdown === true, `affix ${id} must have hasTierBreakdown === true`);
-    assert(affix.tiers.length >= 1, `affix ${id} has empty tiers array`);
+    assert(affix.id === Number(id), `affix ${id}: id mismatch (got ${affix.id})`);
+    assert(typeof affix.name === 'string' && affix.name.length > 0, `affix ${id}: empty name`);
     assert(
-      !('summaryText' in affix),
-      `affix ${id} still has a summaryText field — should be dropped`,
+      affix.type === 'Prefix' || affix.type === 'Suffix',
+      `affix ${id}: invalid type ${affix.type}`,
     );
-    let prev = 0;
-    for (const t of affix.tiers) {
-      assert(
-        Number.isInteger(t.tier) && t.tier >= 1 && t.tier <= 8,
-        `affix ${id} tier value out of range: ${t.tier}`,
-      );
-      assert(t.tier > prev, `affix ${id} tiers not strictly ascending: ${prev} → ${t.tier}`);
-      prev = t.tier;
+    assert(Array.isArray(affix.slots), `affix ${id}: slots not array`);
+    assert(typeof affix.perSlotTiers === 'object', `affix ${id}: perSlotTiers not object`);
+    assert(
+      Number.isInteger(affix.maxTier) && affix.maxTier >= 1 && affix.maxTier <= 8,
+      `affix ${id}: maxTier out of range: ${affix.maxTier}`,
+    );
+    for (const [slot, tiers] of Object.entries(affix.perSlotTiers)) {
+      assert(Array.isArray(tiers) && tiers.length > 0, `affix ${id} slot ${slot}: empty tiers`);
+      let prev = 0;
+      for (const t of tiers) {
+        assert(
+          Number.isInteger(t.tier) && t.tier >= 1 && t.tier <= 8,
+          `affix ${id} slot ${slot}: tier out of range: ${t.tier}`,
+        );
+        assert(
+          t.tier > prev,
+          `affix ${id} slot ${slot}: tiers not strictly ascending: ${prev} → ${t.tier}`,
+        );
+        prev = t.tier;
+      }
     }
   }
 }
 
 /**
  * Build the `_meta` object to embed in both output files.
- * @param {{fetchedAt?: string, commitHash?: string}} rawMeta
+ * @param {{fetchedAt?: string, commitHash?: string, tunklab_source?: string}} rawMeta
  * @returns {object}
  */
 function buildMeta(rawMeta) {
   return {
     fetchedAt: typeof rawMeta.fetchedAt === 'string' ? rawMeta.fetchedAt : 'unknown',
     commitHash: typeof rawMeta.commitHash === 'string' ? rawMeta.commitHash : 'unknown',
-    source: 'PoB-LE / Musholic/PathOfBuildingForLastEpoch',
+    sources: {
+      tunklab:
+        typeof rawMeta.tunklab_source === 'string'
+          ? rawMeta.tunklab_source
+          : 'https://lastepoch.tunklab.com',
+      pobLe: 'PoB-LE / Musholic/PathOfBuildingForLastEpoch',
+    },
     processedAt: new Date().toISOString(),
     schemaVersion: SCHEMA_VERSION,
   };
@@ -500,6 +681,7 @@ async function main() {
   const modItemPath = path.join(RAW_DIR, 'ModItem.json');
   const basesPath = path.join(RAW_DIR, 'bases-full.json');
   const metaPath = path.join(RAW_DIR, '_meta.json');
+  const cacheDir = path.join(RAW_DIR, 'tunklab-cache');
 
   const modItemText = await readFile(modItemPath, 'utf8');
   console.log(`Reading data/raw/ModItem.json (${modItemText.length} bytes)`);
@@ -509,12 +691,15 @@ async function main() {
   console.log(`Reading data/raw/bases-full.json (${basesText.length} bytes)`);
   const basesRaw = JSON.parse(basesText);
 
-  const rawMeta = await readJson(metaPath);
+  console.log(`Loading Tunklab cache from data/raw/tunklab-cache/`);
+  const tunklabCache = await loadTunklabCache(cacheDir);
+  console.log(`  ${tunklabCache.size} cache records`);
 
+  const rawMeta = await readJson(metaPath);
   const meta = buildMeta(rawMeta);
 
-  // --- Affixes ---
-  const built = buildAffixDb(modItemRaw);
+  // --- Affixes (JOIN PoB-LE + Tunklab) ---
+  const built = buildAffixDb(modItemRaw, tunklabCache);
   validateAffixes(built);
   const affixesSorted = sortKeys(built.affixes, 'numeric');
 
@@ -536,8 +721,9 @@ async function main() {
 
   const baseCount = Object.keys(basesSorted).length;
   console.log(
-    `\u2713 public/data/affixes.json \u2014 ${built.stats.total} affixes ` +
-      `(full T1-T8: ${built.stats.fullEight}, capped at T7: ${built.stats.cappedSeven}, single T1: ${built.stats.singleOne})`,
+    `\u2713 public/data/affixes.json \u2014 ${built.stats.processed} affixes ` +
+      `(full T1-T8: ${built.stats.fullEight}, capped at T7: ${built.stats.cappedSeven}, ` +
+      `single T1: ${built.stats.singleOne}, other: ${built.stats.other})`,
   );
   console.log(`\u2713 public/data/bases.json \u2014 ${baseCount} bases`);
 }

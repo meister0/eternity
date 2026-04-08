@@ -87,36 +87,60 @@ export function fuseRanges(ranges: readonly ValueRange[]): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a stash-search regex fragment for the given affix at the given tier.
+ * Build a stash-search regex fragment for the given affix at the given tier
+ * on the given slot.
  *
  * Game tiers run from T1 (lowest) to T8 ("primordial", added in the prior
  * season — drop-only, dramatically stronger than T7). See PLAN.md §4.
  *
- * Example output for Rejuvenating (affix 330) at T8, exact=true:
+ * The `slot` parameter is REQUIRED because per-slot tier scaling is real:
+ * affix 330 Mana Regeneration on a Belt has T8 = 94..110% but on an Amulet
+ * the same T8 is 110..129%. The caller must pass the slot the user is
+ * filtering for, and it must be one of `affix.slots` (which mirrors
+ * Tunklab's "Applies To" vocabulary).
+ *
+ * Example output for Mana Regeneration (affix 330) on Belt at T8, exact=true:
  *   "T8&/(9[4-9]|10\\d|110)% increased mana regen/"
+ *
+ * Example output for the same affix on Amulet at T8, exact=true:
+ *   "T8&/(11\\d|12[0-9])% increased mana regen/"
  */
-export function affixToRegex(affix: ProcessedAffix, minTier: number, exact: boolean): string {
-  if (!affix.hasTierBreakdown) {
-    throw new Error(
-      `affixToRegex: affix "${affix.name}" (id=${affix.id}) has no tier breakdown ` +
-        `and cannot be expressed with tier precision.`,
-    );
-  }
+export function affixToRegex(
+  affix: ProcessedAffix,
+  slot: string,
+  minTier: number,
+  exact: boolean,
+): string {
   if (!Number.isInteger(minTier) || minTier < 1 || minTier > 8) {
     throw new Error(`affixToRegex: minTier must be an integer in 1..8, got ${minTier}`);
   }
 
-  const affixMaxTier = affix.tiers.reduce((acc, t) => (t.tier > acc ? t.tier : acc), 0);
-  if (minTier > affixMaxTier) {
+  if (!affix.slots.includes(slot)) {
     throw new Error(
-      `affixToRegex: affix "${affix.name}" (id=${affix.id}) has max tier T${affixMaxTier}, ` +
-        `cannot select T${minTier}.`,
+      `affixToRegex: affix "${affix.name}" (id=${affix.id}) does not roll on slot "${slot}". ` +
+        `Valid slots: ${affix.slots.join(', ')}`,
+    );
+  }
+
+  const slotTiers = affix.perSlotTiers[slot];
+  if (!slotTiers || slotTiers.length === 0) {
+    throw new Error(
+      `affixToRegex: affix "${affix.name}" (id=${affix.id}) has no per-slot tier data ` +
+        `for slot "${slot}".`,
+    );
+  }
+
+  const slotMaxTier = slotTiers.reduce((acc, t) => (t.tier > acc ? t.tier : acc), 0);
+  if (minTier > slotMaxTier) {
+    throw new Error(
+      `affixToRegex: affix "${affix.name}" (id=${affix.id}) on slot "${slot}" ` +
+        `has max tier T${slotMaxTier}, cannot select T${minTier}.`,
     );
   }
 
   const pickedTiers: readonly ProcessedTier[] = exact
-    ? affix.tiers.filter((t) => t.tier === minTier)
-    : affix.tiers.filter((t) => t.tier >= minTier);
+    ? slotTiers.filter((t) => t.tier === minTier)
+    : slotTiers.filter((t) => t.tier >= minTier);
 
   if (pickedTiers.length === 0) {
     throw new Error(
@@ -124,22 +148,18 @@ export function affixToRegex(affix: ProcessedAffix, minTier: number, exact: bool
     );
   }
 
-  // Canonical wording comes from the lowest picked tier (wording is stable
-  // across tiers; only the numbers change).
-  const canonicalTier = pickedTiers.reduce(
-    (acc, t) => (t.tier < acc.tier ? t : acc),
-    pickedTiers[0],
-  );
-
+  // Stat-name template comes from PoB-LE (e.g. "(10-14)% increased Mana Regen").
+  // Tunklab's per-tier displayText is just the value range and lacks the stat
+  // verb, so it can't be used for regex generation.
   // Hybrid (multi-stat) affixes: split on " / " and emit one fragment per line.
-  const statLines = canonicalTier.displayText.split(' / ');
+  const statLines = affix.statTemplate.split(' / ');
 
   const statRegex =
     statLines.length > 1
       ? `(${statLines
           .map((line, idx) => buildStatLineRegex(line, pickedTiers, idx, statLines.length))
           .join('|')})`
-      : buildStatLineRegex(canonicalTier.displayText, pickedTiers, 0, 1);
+      : buildStatLineRegex(statLines[0], pickedTiers, 0, 1);
 
   const prefix = exact ? `T${minTier}` : `T${minTier}+`;
   return `${prefix}&/${statRegex}/`;

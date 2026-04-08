@@ -1,235 +1,146 @@
-# Data sources for the base ↔ affix relationship
+# Data sources
 
-> **Status:** P1.1 spike (4 h budget). Decision: **B — slot-only fallback,
-> upgrade path to A documented**.
-> **Investigation date:** 2026-04-07.
-> **Author of this draft:** automated spike — see [research-samples/SANDBOX-NOTE.md](./research-samples/SANDBOX-NOTE.md)
-> for an important caveat about why no external sources were actually probed
-> in this session. The decision below is the _safe_ one to ship MVP on; the
-> next maintainer should still attempt the external probes when they have
-> network access.
+> **Status:** Current as of 2026-04-08. Decision A (precise per-affix slot and tier mapping via Tunklab) is locked in and empirically verified.
+> **Supersedes:** the earlier P1.1 spike note that shipped Decision B (slot-only fallback). See §7 for the history.
 
 ---
 
 ## 1. Goal
 
-Last Epoch has roughly 692 normal affixes (PoB-LE `ModItem.json`, dropping
-synthetic tier-0 entries). For the new "Affixes by Base" UI we want to answer:
-
-> Given a slot like _Belt_, which affixes can roll on it?
-
-`ModItem.json` has every affix's wording, level, tiers, and rolled value
-ranges, but **no slot field**. `bases-full.json` has every base's slot
-category, but **no per-base affix list**. Neither file says "Mana Regen
-(affix 330) can roll on Belt, Amulet, Relic". That single relationship is the
-last missing piece for a precise UI; everything else is already on disk.
+The search-builder UI needs structured, per-affix metadata for every rollable mod in Last Epoch: canonical name, prefix/suffix classification, category, the exact set of slots the affix can roll on, and the rolled value range at every tier (T1 through T8, including the new T8 primordial). PoB-LE gives us the ~1112 affix IDs and numeric tier scaffolding, but its display fields are incomplete and predate the primordial season. This doc describes how we fill that gap by joining PoB-LE with a scraped copy of Tunklab, which side of each join wins on which field, and why we rejected the other candidate sources.
 
 ---
 
-## 2. Sources investigated
+## 2. Sources
 
-### 2.1 Local PoB-LE dumps (already in `data/raw/`)
+### 2.1 Tunklab — primary
 
-| File                  | Path                           | Has affix→slot?                                                                                                                                                                 |
-| --------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | -------- | ------- | ----------- | ------------------------------------------------------------------------------------------------------ |
-| `ModItem.json`        | `data/raw/ModItem.json`        | **No.** Confirmed: `grep` for `slot                                                                                                                                             | validBase | baseList | slotTag | allowedSlot | itemType`returns 96 false-positive hits, all of them inside literal stat text like`"+1 Potion Slots"`. |
-| `bases-full.json`     | `data/raw/bases-full.json`     | **No.** `grep` returns 18 false-positive hits, none are structural fields. Bases only carry `type`, `baseTypeID`, `subTypeID`, `req.level`, `affixEffectModifier`, `implicits`. |
-| `affixes-id-map.json` | `data/raw/affixes-id-map.json` | **Possibly, but unverified.** Keys are 4–10 char base64-ish slugs. PoB-LE may pack slot+family info into them, but decoding is a separate spike.                                |
-| `bases.json`          | `data/raw/bases.json`          | **No.** `{slug: {baseTypeId, subTypeId}}` pointing back into `bases-full.json`.                                                                                                 |
+- **URL:** <https://lastepoch.tunklab.com>
+- **Maintained by:** community user "Tunk".
+- **Stack:** server-rendered Next.js with Ant Design tables.
+- **Coverage:** every rollable affix in Last Epoch, with a detail page per affix slug (e.g. `/affix/increased_mana_regen`). Sitemap enumerates 1112 affix URLs — exact 1:1 match with PoB-LE's distinct affix IDs.
+- **Fields used:** `ID`, `Name`, `Nickname`, `Type` (Prefix/Suffix), `Category`, `Applies To` (slot list), `Rarity on Items`, `Modified Stats`, and the per-slot scaled-value table with columns `Tier1..Tier8`.
+- **Why a headless browser:** the meta key/value table is in the raw HTML, but the scaled-values table is rendered client-side by Ant Design after JS hydration. `curl` returns a page stub without the Tier6/Tier7/Tier8 columns. We drive a headless Chromium via the globally-installed `playwright-cli` binary from `scripts/scrape-tunklab.mjs` (see §3). A full scrape of all 1112 pages takes roughly ten minutes and is fully resumable — any per-slug cache file that already exists is skipped on re-run.
+- **License:** unclear from the site itself. We credit Tunklab and "Tunk" by name and link per §8. If a license statement surfaces later, update README/CONTRIBUTING accordingly.
 
-See [research-samples/local-data-summary.md](./research-samples/local-data-summary.md)
-for the inline evidence.
+### 2.2 PoB-LE — secondary join partner
 
-### 2.2 External sources (not probed in this session)
+- **URL:** <https://github.com/Musholic/PathOfBuildingForLastEpoch> (MIT licensed)
+- **Fetched from:** `raw.githubusercontent.com/Musholic/PathOfBuildingForLastEpoch/master/src/Data/`
+- **Files used:** `ModItem.json`, `Bases/bases.json`, `LEToolsImport/affixes.json`, plus a commit-SHA pin captured in `data/raw/_meta.json`.
+- **Fields we trust from PoB-LE:**
+  - **`statOrderKey`** — integer affix-family ID used to detect mutually exclusive affixes on one item (the source of the UI's "conflicts with X" warning). Tunklab does not expose this.
+  - **Per-tier `level`** — the required item level for each individual tier. Tunklab only publishes an aggregate level requirement per affix.
+  - **Cheap enumeration** — the 1112 distinct affix IDs and their numeric tier scaffolding come essentially for free from a single HTTP fetch, so we use PoB-LE as the outer loop and Tunklab as the enrichment lookup.
+- **Fields we deliberately drop from PoB-LE:**
+  - `affix` (display name) — frequently `null` or an internal slug.
+  - `type` (Prefix/Suffix) — contains known misclassifications. The canonical counter-example is affix `330` Mana Regeneration, which PoB-LE tags as `Suffix` but is actually a `Prefix` in-game and on Tunklab. We have independently verified several more such mismatches.
+  - Per-tier value ranges — PoB-LE exposes a single "default" set per affix with no per-slot variation. Tunklab carries a full per-slot table and differs meaningfully (e.g. Mana Regen T8 is 94-110% on Belt/Relic/Ring but 110-129% on Amulet).
+  - Tier count — PoB-LE predates the T8 primordial tier and caps at what is now called T7 in-game.
 
-| #   | Source                                                     | URL pattern                                                                                                                                                | Status this session                                   | What we expected to find                                                                                                                                                                                                               |
-| --- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Tunklab Next.js data routes                                | `https://lastepoch.tunklab.com/_next/data/<buildId>/affixes.json` and `/affixes/<id>.json`                                                                 | **Not probed — sandbox denied all outbound network.** | Tunklab affix detail pages render slot icons, so the underlying Next.js data route should contain a structured `slots` field. Plan §3.4 notes Tunklab returns 200 from US fetches but 526 from some user locations.                    |
-| 2   | Tunklab HTML pages                                         | `https://lastepoch.tunklab.com/affixes/<slug>`                                                                                                             | Not probed (same reason).                             | Slot icons in rendered HTML — fragile but parseable as a backup.                                                                                                                                                                       |
-| 3   | lastepochtools.com                                         | `https://www.lastepochtools.com/db/prefixes`                                                                                                               | Not probed (same reason).                             | Per-affix tables with slot columns. **Plan §3.4 already documents this is behind Cloudflare bot challenge** (`cf-mitigated: challenge`, 403 to curl). Out of scope for this spike per task instructions ("do NOT install Playwright"). |
-| 4   | PoB-LE Lua source on GitHub                                | `https://github.com/Musholic/PathOfBuildingForLastEpoch` — `src/Data/Misc.lua`, `src/Modules/ModCache.lua`, `src/Classes/Item.lua`, `src/Data/ModItem.lua` | Not probed (same reason).                             | PoB-LE's planner must apply mods to bases when building gear, so the slot→affix relationship is somewhere in the Lua. Most likely in a per-tag table or in `ModCache`. Highest-confidence source if reachable.                         |
-| 5   | `gh search code 'affix slot' --owner Musholic` and similar | n/a                                                                                                                                                        | Not probed (same reason).                             | Forks, sibling tools (last-epoch-toolkit, le-build-planner, etc.) that might already have a derived JSON.                                                                                                                              |
+### 2.3 lastepochtools.com — investigated and rejected
 
-**The reason none of these were probed is documented in
-[research-samples/SANDBOX-NOTE.md](./research-samples/SANDBOX-NOTE.md).** The
-sandbox executing this spike refused every form of outbound network call,
-including the ones the task explicitly authorized. A re-run from a session
-with network access remains the cheapest way to attempt Option A — none of
-the _actual_ sources have been ruled out yet; they simply weren't reachable
-from here.
-
----
-
-## 3. Sample affixes used for validation
-
-These are the 5 spot-checks any candidate affix→slot table must pass before
-we'd trust it. Use them in P1.2 against whatever source ends up chosen.
-
-| Affix ID                        | Display name                          | Type   | Expected slots                                                 | Source of truth                           |
-| ------------------------------- | ------------------------------------- | ------ | -------------------------------------------------------------- | ----------------------------------------- |
-| 330                             | Rejuvenating (% increased Mana Regen) | Suffix | Belt, Amulet, Relic                                            | In-game tooltip, well-known to LE players |
-| (varies by patch)               | Crit Chance suffix                    | Suffix | Gloves, Amulet, Ring, Catalyst                                 | In-game tooltip                           |
-| (Hale / +Health prefix)         | +Health prefix                        | Prefix | Helmet, Body, Belt, Boots, Gloves, Amulet, Ring                | In-game tooltip                           |
-| (Cold Res suffix)               | Cold Resistance                       | Suffix | Helmet, Body, Belt, Boots, Gloves, Amulet, Ring, Relic, Shield | In-game tooltip                           |
-| (Increased melee damage prefix) | Increased Damage prefix(es)           | Prefix | Weapons + (some types) Idols                                   | In-game tooltip                           |
-
-The integer affix IDs for the 4 non-Mana-Regen entries should be looked up in
-`ModItem.json` by `affix` name during P1.2 — this spike did not attempt to
-pin them down because the lookup is trivial once you have a candidate source
-to validate against.
+`https://www.lastepochtools.com/db/prefixes` has comparable coverage but is protected by Cloudflare. Anonymous requests return HTTP 403 with `cf-mitigated: challenge`, and the page cannot be retrieved without browser fingerprinting, residential proxies, or a paid scraping service. None of this is worth building now that Tunklab gives us everything we need without a bot challenge. We will revisit only if Tunklab disappears or stops tracking new affixes.
 
 ---
 
-## 4. Decision: **B — slot-only fallback, with documented upgrade path to A**
+## 3. Pipeline
 
-### What "B" means concretely
+```
+Weekly cron / manual trigger
+     │
+     ▼
+┌─────────────────────────┐
+│ npm run update-data     │  fetches upstream canonical snapshots
+│                         │    → data/raw/ModItem.json
+│                         │    → data/raw/bases-full.json
+│                         │    → data/raw/affixes-id-map.json
+│                         │    → data/raw/tunklab-sitemap.xml
+│                         │    → data/raw/_meta.json  (hashes + PoB-LE commit SHA)
+└─────────────────────────┘
+     │
+     ▼
+┌─────────────────────────┐
+│ npm run scrape-tunklab  │  headless-browser crawl via playwright-cli
+│                         │    → data/raw/tunklab-cache/<slug>.json  (1112 files)
+│                         │    resumable; skips already-cached slugs
+│                         │    ~10 minutes for a full cold run
+│                         │    the cache directory is gitignored
+└─────────────────────────┘
+     │
+     ▼
+┌─────────────────────────┐
+│ npm run process-data    │  PoB-LE ⋈ Tunklab, flattens, validates
+│                         │    → public/data/affixes.json
+│                         │    → public/data/bases.json
+└─────────────────────────┘
+     │
+     ▼
+   git diff → if changed, peter-evans/create-pull-request opens auto-PR
+```
 
-For each affix in `ModItem.json`, we will assign a set of _slot categories_
-(Helmet, Body, Belt, Boots, Gloves, Amulet, Ring, Relic, Shield, Catalyst,
-Quiver, 1HSword, ..., Idol). The mapping is _slot-wide_, not per-base —
-i.e. "Mana Regen rolls on Belts" rather than "Mana Regen rolls on Heavy Belt
-specifically". PLAN.md §3.4 explicitly notes this is enough for ~90% of
-player workflows because LE affix pools are slot-wide; bases differ in
-implicit and tier scaling, not in pool membership.
+Relevant scripts:
 
-The slot list will come from a **hand-curated rules table in
-`scripts/generate-affix-slots.mjs`**, populated by:
+| Script                       | Role                                                                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/update-data.mjs`    | Fetches PoB-LE files and the Tunklab sitemap, hashes everything, writes `_meta.json`.                                     |
+| `scripts/scrape-tunklab.mjs` | Reads the sitemap, drives `playwright-cli` in batches of 25, writes one JSON per affix slug to `data/raw/tunklab-cache/`. |
+| `scripts/process-data.mjs`   | Joins PoB-LE ModItem entries with Tunklab cache entries by affix ID, produces the public JSON artefacts the UI loads.     |
 
-1. **Affix wording → category** — regex / keyword matching on the `affix`
-   name and the `1`/`2` stat lines:
-   - `% Health`, `Hybrid Health` → all body-armor + jewelry
-   - `Mana Regen`, `% Mana` → Belt, Amulet, Relic
-   - `Cold Resistance`, `Fire Resistance`, ... → all armor + jewelry + Relic + Shield
-   - `Critical Strike Chance` (suffix) → Gloves, Amulet, Ring, Catalyst
-   - `% Melee Damage`, `% Spell Damage` → matching weapon types
-   - `Armor`, `% Armor` → all armor pieces
-   - `Idol-only` patterns (`Increased ... while ...`) → Idol
-   - `Block Chance`, `Block Effectiveness` → Shield
-   - ... and so on
-2. **Level field as a tiebreaker** — affixes with `level >= 60` are usually
-   restricted to higher-tier slots, but never use level _alone_ as a slot
-   filter (it's not a 1:1 signal).
-3. **Manual overrides** for the long tail (~50 affixes that don't match a
-   clean rule) — encoded as a top-level `overrides` map in the script.
-4. **`statOrderKey` clustering** — affixes sharing a `statOrderKey` are
-   mutually exclusive on a single item, which means they almost always share
-   a slot pool. Once _one_ affix in a family is mapped, the rest can inherit.
-
-Expected coverage: **600+ of the ~692 normal affixes** within an afternoon
-of curation (the P1.2 acceptance bar). The unmapped tail can be left as
-"unknown — show on every slot" so the user still sees them.
-
-### Why B and not A in this session
-
-- The acceptance criterion for P1.1 is "decision documented", and B is
-  always-shippable: we never block on third-party sites, we never need to
-  scrape or run a browser, and the data refresh story stays "rerun
-  `npm run update-data` and we're done" (no new network dependency).
-- The 4-h budget here was spent entirely on local-data verification and on
-  failing to convince the sandbox to make outbound calls. Per the
-  pre-registered decision rule in PLAN.md §3.4 — "if after 4 h we don't have
-  a clean automatic mapping, ship MVP with slot-only precision and revisit
-  later" — the correct move is B.
-- B does **not** preclude A. The data shape on disk
-  (`public/data/affix-slots.json` keyed by `affixId` → `slot[]`) is
-  identical for either path. Whichever source eventually wins, P1.2 just
-  swaps its generator. UI code in P3.x doesn't change.
-
-### Why A is still worth a follow-up spike (when network is available)
-
-Of the four external candidates, **PoB-LE Lua source (#4) is the most
-likely winner** for these reasons:
-
-- It's a public GitHub repo — no Cloudflare, no rate limits, no fragile
-  Next.js build IDs.
-- The PoB-LE planner must internally know `affix → which slot it can roll
-on` to validate gear, so the data exists somewhere in `src/Data/` or
-  `src/Modules/`. Worst case it's encoded in a Lua table that's
-  straightforward to port to JSON.
-- It versions cleanly with the rest of the data we already pull from
-  `raw.githubusercontent.com/Musholic/PathOfBuildingForLastEpoch/master/...`
-  — same provenance, same update cycle.
-
-Tunklab data routes (#1) are second-best — quick to verify (one HTTP fetch
-to find the buildId, a second to get the JSON) and very low risk if they
-work, but the buildId rotates every Tunklab deploy and the 526-from-some-IPs
-issue is a real ops headache.
+`scripts/build-affix-slots.mjs` currently exists as a standalone cache consumer; it is being folded into `process-data.mjs` as part of the schema migration (task G) and will be removed.
 
 ---
 
-## 5. Next steps for whoever picks up P1.2
+## 4. Coverage
 
-1. **First, retry P1.1's external probes from a session that has network
-   access.** It's a 30-min job if the buildId is exposed:
-   - `curl -A "Mozilla/5.0 ..." https://lastepoch.tunklab.com/ -o tunklab-home.html`
-   - `grep -oE '"buildId":"[^"]+"' tunklab-home.html`
-   - Probe `https://lastepoch.tunklab.com/_next/data/<id>/affixes.json` and
-     a couple of `/affixes/<slug>.json` URLs. Save responses under
-     `docs/research-samples/`.
-   - In parallel, `gh search code 'slot' --repo Musholic/PathOfBuildingForLastEpoch --extension lua`
-     and look at any matches in `src/Data/` or `src/Modules/`.
-   - If either source pans out, **upgrade this doc to Decision A** and
-     proceed with that source. The upgrade is purely additive — the B
-     fallback below still ships if the source is incomplete.
+From the ModItem.json tier distribution (verified 2026-04-08):
 
-2. **Build `scripts/generate-affix-slots.mjs`** (Decision B baseline):
-   - Input: `data/raw/ModItem.json`.
-   - Output: `public/data/affix-slots.json`, shape:
-     ```json
-     {
-       "_meta": {
-         "source": "manual rules + affix wording (P1.1 fallback)",
-         "generatedAt": "2026-04-XXTXX:XX:XXZ",
-         "ruleVersion": 1,
-         "coverage": { "total": 692, "mapped": 6XX, "unmapped": XX }
-       },
-       "slotsByAffixId": {
-         "330": ["Belt", "Amulet", "Relic"],
-         "0":   ["Helmet", "Body", "Belt", "Boots", "Gloves", "Amulet", "Ring"],
-         ...
-       },
-       "unmapped": [<affixId>, ...]
-     }
-     ```
-   - The rules table lives inline in the script, not in a separate JSON, so
-     diffing rule changes shows up in PRs.
-   - Validate against the 5 spot-check affixes in §3 above as part of the
-     script (fail the build if any of them comes out wrong).
-   - Aim for `mapped >= 600` (P1.2 acceptance bar). Anything left in
-     `unmapped` falls back to "show on every slot" in the UI, with a
-     `(?)` tooltip so users know it's a known gap.
+| Cohort                       | Count | Notes                                                                        |
+| ---------------------------- | ----- | ---------------------------------------------------------------------------- |
+| **Total distinct affix IDs** | 1112  | Exact 1:1 match between PoB-LE ModItem.json and the Tunklab sitemap.         |
+| Full T1..T8 progression      | 643   | Standard craftable → exalted → primordial progression.                       |
+| T1..T7 only (capped)         | 49    | No primordial roll exists for these.                                         |
+| Single-T1 entries            | 420   | Special-category affixes — altar, idol-only, sealed-only, unique rolls, etc. |
 
-3. **Wire `_meta.source` into the UI footer** — credit Tunklab/PoB-LE/manual,
-   so users can audit. This is a 5-line task in P5.x but flag it now so it
-   doesn't get forgotten.
-
-4. **Do NOT switch P1.2's data shape based on what source you find.** Both
-   the precise (A) and slot-only (B) paths produce
-   `affixId → slot[]` — keep that as the boundary. The only difference is
-   how `slotsByAffixId` is populated and what `_meta.source` says.
-
-5. **Re-evaluate Decision B vs A after MVP ships.** PLAN.md notes per-base
-   precision is rarely needed because LE pools are slot-wide. Actual usage
-   data (which slots get picked, which affixes get selected) will tell us
-   whether the curated rules table is good enough or whether we need to
-   invest in a real source. Don't pre-optimize.
+The 420 single-tier entries are no longer treated as "broken / summary-only" the way the original P1.1 spike assumed. They are first-class affixes with exactly one tier; the UI renders them with a fixed-T1 label instead of a tier picker.
 
 ---
 
-## 6. Time spent
+## 5. Why Tunklab is the primary source
 
-| Step                                                                                                                           | Planned    | Actual                                                                                                        |
-| ------------------------------------------------------------------------------------------------------------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------- |
-| Read PLAN.md §3.4, §8 P1.1, CLAUDE.md, src/types/affix.ts                                                                      | 15 min     | ~15 min                                                                                                       |
-| Local data audit (`ModItem.json`, `bases-full.json`, `affixes-id-map.json`, `bases.json`) — verify there's truly no slot field | 30 min     | ~25 min                                                                                                       |
-| Tunklab `_next/data` probe                                                                                                     | 60 min     | **0 min — sandbox denied network**                                                                            |
-| Tunklab HTML scrape                                                                                                            | 30 min     | **0 min — same reason**                                                                                       |
-| lastepochtools.com probe                                                                                                       | 15 min     | **0 min — same reason**                                                                                       |
-| PoB-LE Lua source grep via `gh` and raw GitHub                                                                                 | 45 min     | **0 min — same reason**                                                                                       |
-| Write `docs/data-sources.md` + `research-samples/*`                                                                            | 30 min     | ~30 min                                                                                                       |
-| **Total**                                                                                                                      | **~3.5 h** | **~1.2 h** (cut short because the network-dependent steps couldn't be attempted; remaining budget is unspent) |
+- **Canonical names.** PoB-LE frequently has `null` or an internal slug in the `affix` field; Tunklab always has the in-game display name plus a separate nickname (e.g. `Name: "Mana Regeneration"`, `Nickname: "Rejuvenating"`).
+- **Correct Prefix/Suffix classification.** PoB-LE has known misclassifications. Affix `330` Mana Regeneration is the reference case: PoB-LE says `Suffix`, Tunklab (and the in-game UI) says `Prefix`. We have encountered more such mismatches during scraping.
+- **Per-slot tier value variations.** A single affix often rolls at different values depending on slot. PoB-LE only stores one "default" set; Tunklab's scaled-values table has one row per slot. For affix `330`, Belt/Relic/Ring share one scale but Amulet is 10-20% stronger at every tier.
+- **T8 primordial tier.** Tunklab already renders the new top tier; PoB-LE is frozen at its pre-primordial state and would falsely cap every affix one tier early if we trusted its tier count.
+- **Extra fields.** `Category` (Normal Affix / Idol Affix / Altar / etc.), class requirement, and the natural-language `Modified Stats` description all come from Tunklab.
 
-The unspent ~2.8 h of budget should be carried over to whoever re-runs the
-external probes from a network-enabled session. It is **not** wasted by
-shipping Decision B in the meantime — the rules table for B is needed
-either way as the fallback for affixes the upstream source misses.
+## 6. Why PoB-LE is still needed
+
+- **`statOrderKey`** — drives the "these two affixes are mutually exclusive on one item" warning in the UI. Tunklab does not expose family IDs.
+- **Per-tier `level` requirement** — Tunklab shows one aggregate level per affix; PoB-LE breaks it down per tier, which is needed for "minimum item level" filtering.
+- **Cheap enumeration** — the 1112 affix IDs and their numeric tier scaffolding are available from a single HTTP fetch, which makes PoB-LE a natural outer loop for the join.
+
+The join rule in `process-data.mjs` is therefore: start from PoB-LE ModItem entries, key by numeric affix ID, and let Tunklab overwrite `name`, `nickname`, `type`, `category`, `slots`, and the per-slot tier value table. PoB-LE keeps ownership of `statOrderKey` and per-tier `level`.
+
+---
+
+## 7. History
+
+The first investigation of this question was the P1.1 research spike on 2026-04-07. That session was running in a sandbox that denied all outbound network, so none of Tunklab, lastepochtools.com, or the PoB-LE Lua source could actually be probed — the spike fell back to **Decision B (slot-only fallback)** as its "always shippable" choice and documented an upgrade path.
+
+The re-investigation on 2026-04-08 was run from a session with real network access. Two things changed:
+
+1. Tunklab turned out to be trivially reachable and has a complete sitemap of 1112 affix pages. The only wrinkle was that `curl` alone cannot see the Tier6/Tier7/Tier8 columns (client-side rendered), which was resolved by routing the scrape through the globally-installed `playwright-cli` binary rather than adding a `playwright` npm dep.
+2. Spot-checking affix `330` Mana Regeneration exposed the **T8 primordial tier** as a concrete seven-entry → eight-entry shift, and independently confirmed the **PoB-LE Prefix/Suffix misclassification**. Belt T1 = 10-14%, Belt T8 = 94-110%, Amulet T8 = 110-129%. These values do not line up with PoB-LE's assumptions, so precise mapping became both possible and mandatory.
+
+The slot-only fallback from 2026-04-07 has been retired; Decision A is now the shipped path. The `docs/research-samples/` directory is preserved as an artefact of the original spike — do not delete or edit those files, they are the historical record of why we changed course.
+
+---
+
+## 8. Attribution
+
+- **Tunklab** — <https://lastepoch.tunklab.com>, maintained by community user "Tunk". Provides canonical affix metadata and tier values. Credit the author and URL; re-check the license statement the next time the site is scraped.
+- **PathOfBuildingForLastEpoch** — <https://github.com/Musholic/PathOfBuildingForLastEpoch>, MIT-licensed, maintained by Musholic. Provides the affix enumeration, `statOrderKey`, and per-tier level requirements.
+- **Last Epoch** — a game by Eleventh Hour Games. This project is a community fan tool and not affiliated with EHG.
+
+Both Tunklab and PoB-LE **must** be credited in `README.md` and `CONTRIBUTING.md` as part of Phase 7 (see `PLAN.md` §12). The existing README/CONTRIBUTING predate the Tunklab dependency and currently only mention PoB-LE; updating them is tracked separately.
