@@ -1,5 +1,6 @@
 export { AffixCountsSection } from './AffixCountsSection';
 export { AffixTiersSection } from './AffixTiersSection';
+export { BaseAffixSection } from './BaseAffixSection';
 export { ClassRequirementsSection } from './ClassRequirementsSection';
 export { CustomSearchSection } from './CustomSearchSection';
 export { EquipmentRequirementsSection } from './EquipmentRequirementsSection';
