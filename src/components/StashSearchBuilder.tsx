@@ -370,6 +370,7 @@ export const StashSearchBuilder = () => {
 
         <BaseAffixSection
           selectedAffixes={state.selectedAffixes}
+          globalOperator={state.globalOperator}
           onSelectedAffixesChange={handleSelectedAffixesChange}
         />
 
