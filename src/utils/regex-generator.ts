@@ -13,6 +13,7 @@
  */
 
 import type { ProcessedAffix, ProcessedTier, ValueRange } from '../types/affix';
+import type { EquipmentSlot } from '../types/stash-search';
 
 // ---------------------------------------------------------------------------
 // Numeric range → regex
@@ -107,7 +108,7 @@ export function fuseRanges(ranges: readonly ValueRange[]): string {
  */
 export function affixToRegex(
   affix: ProcessedAffix,
-  slot: string,
+  slot: EquipmentSlot,
   minTier: number,
   exact: boolean,
 ): string {

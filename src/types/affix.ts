@@ -43,10 +43,11 @@ export interface ProcessedTier {
   readonly level: number;
 }
 
-/** Map of slot name → tier list. Slot names match Tunklab's "Applies To" vocabulary
- *  (e.g. "Belt", "Amulet", "One Handed Sword") which is NOT the same as the
- *  EquipmentSlot union — the UI maps between them. */
-export type PerSlotTiers = Readonly<Record<string, readonly ProcessedTier[]>>;
+/** Map from `EquipmentSlot` to its tier list. The processor canonicalizes
+ *  Tunklab's two raw slot vocabularies into the existing `EquipmentSlot`
+ *  union before keying this record, so consumers can rely on the keys being
+ *  valid `EquipmentSlot` literals. */
+export type PerSlotTiers = Readonly<Partial<Record<EquipmentSlot, readonly ProcessedTier[]>>>;
 
 export interface ProcessedAffix {
   readonly id: number;
@@ -65,15 +66,18 @@ export interface ProcessedAffix {
   readonly classRequirement: readonly string[];
   /** Aggregate required character level from Tunklab. Null when unspecified. */
   readonly levelRequirement: number | null;
-  /** Slot vocabulary from Tunklab "Applies To" field. */
-  readonly slots: readonly string[];
+  /** Equipment slots this affix can roll on. Always equal to
+   *  `Object.keys(perSlotTiers).sort()` — single source of truth. */
+  readonly slots: readonly EquipmentSlot[];
   /** PoB-LE display text template for regex generation, e.g.
    *  "(10-14)% increased Mana Regen". Hybrid affixes are joined with " / ".
    *  PoB markers like {rounding:Integer} are stripped. The numeric placeholder
    *  is in PoB-LE's "(min-max)" form, not Tunklab's "(min% to max%)" form.
    *  Used by the regex generator as the source of the stat-name verb. */
   readonly statTemplate: string;
-  /** Tier values per slot. Different slots may have different value ranges. */
+  /** Tier values per slot. Different slots may have different value ranges
+   *  (e.g. affix 330 Mana Regeneration on Belt T8 = 94..110% but on Amulet
+   *  T8 = 110..129%). */
   readonly perSlotTiers: PerSlotTiers;
   /** Highest tier present across all slots. Typically 8 (full progression),
    *  7 (capped, no T8 primordial roll), or 1 (single-T1 special-category). */

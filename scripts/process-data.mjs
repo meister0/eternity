@@ -227,18 +227,123 @@ function parseLevelRequirement(raw) {
 }
 
 /**
- * Split Tunklab's "Applies To" field on newlines. The scraper preserves the
- * inner-text newlines between slot names, so this is a simple split.
+ * Canonicalize a Tunklab slot string into the existing `EquipmentSlot`
+ * vocabulary already used by the macro system (`1HAxe`, `Body`, `Small`,
+ * `Catalyst`, etc. — see `src/types/stash-search.ts` and `EQUIPMENT_SLOT_MACROS`
+ * in `src/data/stash-macros.ts`).
  *
- * @param {string | null | undefined} raw
- * @returns {string[]}
+ * Tunklab uses TWO different slot vocabularies on a single affix detail page:
+ *   - The `Applies To` field (long form):  "One Handed Sword", "Idol 1x2", "Body Armor"
+ *   - The Scaled Values table rows (short): "1H Sword",         "Minor Idol", "Body Armor"
+ * Plus an upstream typo: `"One Handed Maces"` (plural) for 1H Mace.
+ * Plus a long-form-only split where `Small Idol` is broken into faction
+ * variants `"Idol 1x1 Eterra"` and `"Idol 1x1 Lagon"`.
+ *
+ * We canonicalize BOTH Tunklab forms into `EquipmentSlot` so that:
+ *   - `affix.slots` is `readonly EquipmentSlot[]` (type-safe in the UI)
+ *   - `affix.perSlotTiers` is keyed by `EquipmentSlot`
+ *   - the regex generator's `slot` parameter is `EquipmentSlot`
+ *   - the UI can reuse `EQUIPMENT_SLOT_MACROS` directly for labels
+ *
+ * The two `Idol 1x1 *` faction variants both collapse to `'Small'` since
+ * Tunklab itself collapses them in the Scaled Values table; faction is
+ * informational only and does not affect affix rolls.
+ *
+ * Unknown strings pass through unchanged and emit a warning so future
+ * upstream additions are visible (e.g. a new weapon class in a patch).
+ *
+ * @type {Readonly<Record<string, string>>}
  */
-function splitTunklabSlots(raw) {
-  if (typeof raw !== 'string') return [];
-  return raw
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
+const TUNKLAB_SLOT_CANONICAL = {
+  // Armor — only "Body Armor" needs normalization, the rest are already
+  // EquipmentSlot literals.
+  'Body Armor': 'Body',
+  // Weapons — long-form (Applies To) AND short-form (Scaled Values rows)
+  // both canonicalize to the EquipmentSlot macro form.
+  'One Handed Axe': '1HAxe',
+  '1H Axe': '1HAxe',
+  'One Handed Dagger': 'Dagger',
+  // 'Dagger' (short form) is already EquipmentSlot literal — passes through.
+  'One Handed Maces': '1HMace', // upstream Tunklab typo (plural)
+  '1H Mace': '1HMace',
+  'One Handed Sceptre': 'Sceptre',
+  // 'Sceptre' (short form) is already EquipmentSlot literal — passes through.
+  'One Handed Sword': '1HSword',
+  '1H Sword': '1HSword',
+  'Two Handed Axe': '2HAxe',
+  '2H Axe': '2HAxe',
+  'Two Handed Mace': '2HMace',
+  '2H Mace': '2HMace',
+  'Two Handed Spear': 'Spear',
+  // 'Spear' (short form) is already EquipmentSlot literal — passes through.
+  'Two Handed Staff': 'Staff',
+  // 'Staff' (short form) is already EquipmentSlot literal — passes through.
+  'Two Handed Sword': '2HSword',
+  '2H Sword': '2HSword',
+  // Off-hand
+  Catalyst: 'Catalyst', // identity, but listed for completeness
+  'Off-Hand Catalyst': 'Catalyst',
+  // Idols — Applies To uses "Idol NxM" geometry, Scaled Values uses
+  // "Small/Minor/Humble/Stout/Ornate/Grand/Huge/Large/Adorned Idol".
+  'Idol 1x1 Eterra': 'Small',
+  'Idol 1x1 Lagon': 'Small',
+  'Small Idol': 'Small',
+  'Idol 1x2': 'Minor',
+  'Minor Idol': 'Minor',
+  'Idol 2x1': 'Humble',
+  'Humble Idol': 'Humble',
+  'Idol 1x3': 'Stout',
+  'Stout Idol': 'Stout',
+  'Idol 3x1': 'Ornate',
+  'Ornate Idol': 'Ornate',
+  'Idol 1x4': 'Grand',
+  'Grand Idol': 'Grand',
+  'Idol 4x1': 'Huge',
+  'Huge Idol': 'Huge',
+  'Idol 2x2': 'Large',
+  'Large Idol': 'Large',
+  'Adorned Idol': 'Adorned',
+  'Idol Altar': 'Altar',
+  // Identity entries for slot strings that already match EquipmentSlot
+  // literals — listed explicitly so the unknown-slot warning fires only for
+  // genuinely unrecognized upstream additions.
+  Helmet: 'Helmet',
+  Belt: 'Belt',
+  Boots: 'Boots',
+  Gloves: 'Gloves',
+  Amulet: 'Amulet',
+  Ring: 'Ring',
+  Relic: 'Relic',
+  Shield: 'Shield',
+  Quiver: 'Quiver',
+  Bow: 'Bow',
+  Wand: 'Wand',
+  Dagger: 'Dagger',
+  Sceptre: 'Sceptre',
+  Spear: 'Spear',
+  Staff: 'Staff',
+};
+
+/** Set of unknown slot strings already warned about, to avoid log spam. */
+const _warnedUnknownSlots = new Set();
+
+/**
+ * @param {string} slot
+ * @returns {string}
+ */
+function normalizeTunklabSlot(slot) {
+  const mapped = TUNKLAB_SLOT_CANONICAL[slot];
+  if (mapped !== undefined) return mapped;
+  // Pass-through for slots that already match EquipmentSlot. Warn once for
+  // anything that doesn't match either set so upstream additions are visible.
+  if (!_warnedUnknownSlots.has(slot)) {
+    _warnedUnknownSlots.add(slot);
+    console.warn(
+      `warn: Tunklab slot "${slot}" is not in the canonical map and may not ` +
+        `match EquipmentSlot — passing through verbatim.`,
+    );
+  }
+  return slot;
 }
 
 /**
@@ -365,7 +470,13 @@ function buildProcessedAffix(affixId, modItemTierMap, tunklabRecord) {
   const category = (meta.Category ?? '').trim();
   const classRequirement = parseClassRequirement(meta['Class requirement']);
   const levelRequirement = parseLevelRequirement(meta['Level requirement']);
-  const slots = splitTunklabSlots(meta['Applies To']);
+  // NOTE: we deliberately do NOT use Tunklab's `Applies To` field as the
+  // source of `slots`. Tunklab's "Applies To" and the Scaled Values rows
+  // are out of sync for idol affixes (they list different idol sub-types
+  // for the same affix). The Scaled Values rows are the authoritative
+  // source because they bind a slot to actual tier values; we derive
+  // `slots` from `Object.keys(perSlotTiers)` after building the per-slot
+  // tier tables below.
 
   // PoB-LE provides statOrderKey + per-tier level (Tunklab only has aggregate)
   // and the canonical stat-name template for regex generation.
@@ -390,7 +501,7 @@ function buildProcessedAffix(affixId, modItemTierMap, tunklabRecord) {
   if (scaled?.headers && Array.isArray(scaled.rows)) {
     const tierCount = countTunklabTierColumns(scaled.headers);
     for (const row of scaled.rows) {
-      const slotName = row.slot;
+      const slotName = row.slot ? normalizeTunklabSlot(row.slot) : '';
       if (!slotName || tierCount === 0) continue;
       // The scraper kept the leading slot column in row.tiers (since it
       // collected all <td>s); the LAST `tierCount` elements of row.tiers
@@ -416,6 +527,10 @@ function buildProcessedAffix(affixId, modItemTierMap, tunklabRecord) {
       }
     }
   }
+
+  // Derive `slots` from perSlotTiers keys — single source of truth that
+  // guarantees `affix.slots` and `affix.perSlotTiers` are always aligned.
+  const slots = Object.keys(perSlotTiers).sort();
 
   return {
     id: idFromTunklab,
