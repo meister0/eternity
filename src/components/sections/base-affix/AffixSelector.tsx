@@ -2,21 +2,25 @@ import { useMemo, useState } from 'react';
 import { useAffixDb } from '../../../data/affix-runtime';
 import type { ProcessedAffix, SelectedAffix } from '../../../types/affix';
 import type { EquipmentSlot } from '../../../types/stash-search';
-import { SectionContainer, SectionHeader } from '../../ui';
 import { AffixTierPicker } from './AffixTierPicker';
 
 interface AffixSelectorProps {
-  selectedSlot: EquipmentSlot | null;
+  /** Required — the parent BaseAffixSection only mounts this component
+   *  after a slot has been chosen (progressive disclosure), so we no
+   *  longer carry the `null` placeholder state here. */
+  selectedSlot: EquipmentSlot;
   selectedAffixes: readonly SelectedAffix[];
   onAddAffix: (affixId: number, tier: number, exact: boolean) => void;
 }
+
+// Headless: no outer card or header. BaseAffixSection provides the card.
 
 export function AffixSelector({ selectedSlot, selectedAffixes, onAddAffix }: AffixSelectorProps) {
   const { data, loading, error } = useAffixDb();
   const [filter, setFilter] = useState('');
 
   const { prefixes, suffixes } = useMemo(() => {
-    if (data === null || selectedSlot === null) {
+    if (data === null) {
       return { prefixes: [] as ProcessedAffix[], suffixes: [] as ProcessedAffix[] };
     }
     const needle = filter.trim().toLowerCase();
@@ -50,83 +54,69 @@ export function AffixSelector({ selectedSlot, selectedAffixes, onAddAffix }: Aff
   // Dedup check is scoped to the current slot: the same affix on a different
   // slot is a separately-valid selection because per-slot value scaling makes
   // its generated regex distinct. See SelectedAffix.slot docstring.
-  const selectedIdsOnSlot = useMemo(() => {
-    if (selectedSlot === null) return new Set<number>();
-    return new Set(
-      selectedAffixes.filter((sa) => sa.slot === selectedSlot).map((sa) => sa.affixId),
-    );
-  }, [selectedAffixes, selectedSlot]);
+  const selectedIdsOnSlot = useMemo(
+    () => new Set(selectedAffixes.filter((sa) => sa.slot === selectedSlot).map((sa) => sa.affixId)),
+    [selectedAffixes, selectedSlot],
+  );
+
+  if (loading) {
+    return <div className="text-sm text-gray-400">Loading affixes…</div>;
+  }
+  if (error !== null) {
+    return <div className="text-sm text-red-400">Error loading affixes: {error.message}</div>;
+  }
+  if (data === null) {
+    return null;
+  }
 
   return (
-    <SectionContainer className="mb-6 md:mb-8">
-      <SectionHeader>Add Affix</SectionHeader>
+    <>
+      <input
+        type="text"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="Filter by name or nickname..."
+        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:border-amber-400 focus:outline-none mb-3"
+      />
 
-      {selectedSlot === null && (
-        <div className="text-sm text-gray-500 italic">Pick a slot first</div>
-      )}
-
-      {selectedSlot !== null && loading && (
-        <div className="text-sm text-gray-400">Loading affixes...</div>
-      )}
-
-      {selectedSlot !== null && error !== null && (
-        <div className="text-sm text-red-400">Error loading affixes: {error.message}</div>
-      )}
-
-      {selectedSlot !== null && !loading && error === null && data !== null && (
-        <>
-          <input
-            type="text"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter by name or nickname..."
-            className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:border-amber-400 focus:outline-none mb-3"
-          />
-
-          <div className="max-h-96 overflow-y-auto">
-            <div className="mb-4">
-              <h4 className="text-sm font-medium text-gray-300 mb-2">
-                Prefixes ({prefixes.length})
-              </h4>
-              {prefixes.length === 0 ? (
-                <div className="text-xs text-gray-500 italic">No prefixes match</div>
-              ) : (
-                <div>
-                  {prefixes.map((affix) => (
-                    <AffixRow
-                      key={affix.id}
-                      affix={affix}
-                      disabled={selectedIdsOnSlot.has(affix.id)}
-                      onAdd={onAddAffix}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-
+      <div className="max-h-96 overflow-y-auto">
+        <div className="mb-4">
+          <h4 className="text-sm font-medium text-gray-300 mb-2">Prefixes ({prefixes.length})</h4>
+          {prefixes.length === 0 ? (
+            <div className="text-xs text-gray-500 italic">No prefixes match</div>
+          ) : (
             <div>
-              <h4 className="text-sm font-medium text-gray-300 mb-2">
-                Suffixes ({suffixes.length})
-              </h4>
-              {suffixes.length === 0 ? (
-                <div className="text-xs text-gray-500 italic">No suffixes match</div>
-              ) : (
-                <div>
-                  {suffixes.map((affix) => (
-                    <AffixRow
-                      key={affix.id}
-                      affix={affix}
-                      disabled={selectedIdsOnSlot.has(affix.id)}
-                      onAdd={onAddAffix}
-                    />
-                  ))}
-                </div>
-              )}
+              {prefixes.map((affix) => (
+                <AffixRow
+                  key={affix.id}
+                  affix={affix}
+                  disabled={selectedIdsOnSlot.has(affix.id)}
+                  onAdd={onAddAffix}
+                />
+              ))}
             </div>
-          </div>
-        </>
-      )}
-    </SectionContainer>
+          )}
+        </div>
+
+        <div>
+          <h4 className="text-sm font-medium text-gray-300 mb-2">Suffixes ({suffixes.length})</h4>
+          {suffixes.length === 0 ? (
+            <div className="text-xs text-gray-500 italic">No suffixes match</div>
+          ) : (
+            <div>
+              {suffixes.map((affix) => (
+                <AffixRow
+                  key={affix.id}
+                  affix={affix}
+                  disabled={selectedIdsOnSlot.has(affix.id)}
+                  onAdd={onAddAffix}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 

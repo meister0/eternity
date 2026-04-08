@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBaseDb } from '../../../data/base-runtime';
 import type { ProcessedBase } from '../../../types/affix';
 import type { EquipmentSlot } from '../../../types/stash-search';
-import { SectionContainer, SectionHeader } from '../../ui';
 
 interface BasePickerProps {
   selectedSlot: EquipmentSlot | null;
   selectedBaseName: string | null;
   onBaseChange: (baseName: string | null) => void;
 }
+
+// Headless: no outer card or header. BaseAffixSection provides the card.
 
 const INPUT_CLASS =
   'w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 ' +
@@ -85,76 +86,73 @@ export function BasePicker({ selectedSlot, selectedBaseName, onBaseChange }: Bas
   }
 
   return (
-    <SectionContainer className="mb-6 md:mb-8">
-      <SectionHeader>Base</SectionHeader>
-      <div className="relative">
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={query}
-            disabled={inputDisabled}
-            placeholder={placeholder}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setOpen(true);
-            }}
-            onFocus={() => {
-              if (!inputDisabled) setOpen(true);
-            }}
-            onBlur={() => {
-              // Delay so click events on dropdown items can fire first.
-              window.setTimeout(() => setOpen(false), 120);
-            }}
-            className={INPUT_CLASS}
-          />
-          {selectedBaseName !== null && (
-            <button
-              type="button"
-              onClick={handleClear}
-              aria-label="Clear selected base"
-              className="text-gray-400 hover:text-gray-100 px-2 py-1 rounded hover:bg-gray-700 cursor-pointer"
-            >
-              ×
-            </button>
-          )}
-        </div>
-
-        {error !== null && (
-          <p className="mt-2 text-sm text-red-400">Failed to load bases: {error.message}</p>
-        )}
-
-        {showDropdown && (
-          <ul
-            className="absolute z-10 mt-1 w-full max-h-60 overflow-y-auto bg-gray-800 border border-gray-600 rounded-b shadow-lg"
-            role="listbox"
+    <div className="relative">
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={query}
+          disabled={inputDisabled}
+          placeholder={placeholder}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => {
+            if (!inputDisabled) setOpen(true);
+          }}
+          onBlur={() => {
+            // Delay so click events on dropdown items can fire first.
+            window.setTimeout(() => setOpen(false), 120);
+          }}
+          className={INPUT_CLASS}
+        />
+        {selectedBaseName !== null && (
+          <button
+            type="button"
+            onClick={handleClear}
+            aria-label="Clear selected base"
+            className="text-gray-400 hover:text-gray-100 px-2 py-1 rounded hover:bg-gray-700 cursor-pointer"
           >
-            {filteredBases.length === 0 ? (
-              <li className="px-3 py-2 text-sm text-gray-400">No matching bases</li>
-            ) : (
-              filteredBases.map((base) => {
-                const isSelected = base.name === selectedBaseName;
-                return (
-                  <li
-                    key={base.name}
-                    role="option"
-                    aria-selected={isSelected}
-                    onMouseDown={(e) => {
-                      // Prevent the input's onBlur from firing before the click.
-                      e.preventDefault();
-                      handleSelect(base);
-                    }}
-                    className={`px-3 py-2 text-sm cursor-pointer ${
-                      isSelected ? 'bg-amber-600 text-white' : 'text-gray-100 hover:bg-gray-700'
-                    }`}
-                  >
-                    {base.name}
-                  </li>
-                );
-              })
-            )}
-          </ul>
+            ×
+          </button>
         )}
       </div>
-    </SectionContainer>
+
+      {error !== null && (
+        <p className="mt-2 text-sm text-red-400">Failed to load bases: {error.message}</p>
+      )}
+
+      {showDropdown && (
+        <ul
+          className="absolute z-10 mt-1 w-full max-h-60 overflow-y-auto bg-gray-800 border border-gray-600 rounded-b shadow-lg"
+          role="listbox"
+        >
+          {filteredBases.length === 0 ? (
+            <li className="px-3 py-2 text-sm text-gray-400">No matching bases</li>
+          ) : (
+            filteredBases.map((base) => {
+              const isSelected = base.name === selectedBaseName;
+              return (
+                <li
+                  key={base.name}
+                  role="option"
+                  aria-selected={isSelected}
+                  onMouseDown={(e) => {
+                    // Prevent the input's onBlur from firing before the click.
+                    e.preventDefault();
+                    handleSelect(base);
+                  }}
+                  className={`px-3 py-2 text-sm cursor-pointer ${
+                    isSelected ? 'bg-amber-600 text-white' : 'text-gray-100 hover:bg-gray-700'
+                  }`}
+                >
+                  {base.name}
+                </li>
+              );
+            })
+          )}
+        </ul>
+      )}
+    </div>
   );
 }
