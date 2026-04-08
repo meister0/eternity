@@ -494,7 +494,7 @@ function buildProcessedAffix(affixId, modItemTierMap, tunklabRecord) {
   }
 
   // Build per-slot tier tables from Tunklab Scaled Values.
-  /** @type {Record<string, Array<{tier: number, displayText: string, valueRanges: Array<{min:number,max:number}>, level: number}>>} */
+  /** @type {Record<string, Array<{tier: number, valueRanges: Array<{min:number,max:number}>, level: number}>>} */
   const perSlotTiers = {};
   let maxTier = 0;
 
@@ -516,7 +516,6 @@ function buildProcessedAffix(affixId, modItemTierMap, tunklabRecord) {
         const gameTier = i + 1;
         tiers.push({
           tier: gameTier,
-          displayText: cell,
           valueRanges: ranges,
           level: levelByGameTier[gameTier] ?? 0,
         });
@@ -831,16 +830,25 @@ async function main() {
   const affixPayload = { _meta: meta, affixes: affixesSorted };
   const basePayload = { _meta: meta, bases: basesSorted };
 
-  await writeFile(affixOutPath, `${JSON.stringify(affixPayload, null, 2)}\n`, 'utf8');
-  await writeFile(baseOutPath, `${JSON.stringify(basePayload, null, 2)}\n`, 'utf8');
+  // Output is minified — no whitespace between tokens. Cuts ~60% of raw bytes
+  // (4.8 MB -> 1.3 MB) with no schema change. Brotli compression on the wire
+  // is only ~30 KB smaller post-minify, but parse memory and parse time are
+  // proportional to the raw size, which matters on weaker devices.
+  await writeFile(affixOutPath, `${JSON.stringify(affixPayload)}\n`, 'utf8');
+  await writeFile(baseOutPath, `${JSON.stringify(basePayload)}\n`, 'utf8');
 
   const baseCount = Object.keys(basesSorted).length;
+  const affixBytes = (await readFile(affixOutPath)).length;
+  const baseBytes = (await readFile(baseOutPath)).length;
   console.log(
     `\u2713 public/data/affixes.json \u2014 ${built.stats.processed} affixes ` +
       `(full T1-T8: ${built.stats.fullEight}, capped at T7: ${built.stats.cappedSeven}, ` +
-      `single T1: ${built.stats.singleOne}, other: ${built.stats.other})`,
+      `single T1: ${built.stats.singleOne}, other: ${built.stats.other}) ` +
+      `\u2014 ${(affixBytes / 1024).toFixed(0)} KB`,
   );
-  console.log(`\u2713 public/data/bases.json \u2014 ${baseCount} bases`);
+  console.log(
+    `\u2713 public/data/bases.json \u2014 ${baseCount} bases \u2014 ${(baseBytes / 1024).toFixed(0)} KB`,
+  );
 }
 
 main().catch((error) => {

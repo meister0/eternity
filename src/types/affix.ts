@@ -35,9 +35,10 @@ export interface ValueRange {
 export interface ProcessedTier {
   /** Game tier 1..8. */
   readonly tier: number;
-  /** Tunklab raw display text, e.g. "+(94% to 110%)". */
-  readonly displayText: string;
-  /** Numeric range parsed from displayText. Hybrid affixes have one entry per stat line. */
+  /** Numeric range(s). Single-stat affixes have one entry; hybrid affixes
+   *  have one entry per stat line, parallel to the " / "-split statTemplate.
+   *  UI helpers can build a display string by substituting these into the
+   *  affix's `statTemplate`. */
   readonly valueRanges: readonly ValueRange[];
   /** Per-tier required item level — from PoB-LE ModItem.json (Tunklab only has aggregate). */
   readonly level: number;
