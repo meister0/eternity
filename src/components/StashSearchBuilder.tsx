@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAffixDb } from '../data/affix-runtime';
 import { AFFIX_COUNT_MACROS, OPERATOR_OPTIONS } from '../data/stash-macros';
+import type { AffixDb, SelectedAffix } from '../types/affix';
 import type { AffixTier, MacroWithValue, Operator, SearchState } from '../types/stash-search';
+import { affixToRegex } from '../utils/regex-generator';
 import {
   clearURLState,
   createInitialState,
@@ -11,6 +14,7 @@ import {
 import {
   AffixCountsSection,
   AffixTiersSection,
+  BaseAffixSection,
   ClassRequirementsSection,
   CustomSearchSection,
   EquipmentSlotsSection,
@@ -26,8 +30,14 @@ const getOperatorSymbol = (operator: Operator): string => {
   return OPERATOR_OPTIONS.find((op) => op.value === operator)?.symbol ?? '';
 };
 
-// Generate search string from current state
-const generateSearchString = (currentState: SearchState): string => {
+// Generate search string from current state. `affixDb` is passed separately
+// (not on SearchState) because it's async-loaded — null during the first
+// paint, then populated once useAffixDb() resolves. When null, the selected-
+// affix regex fragments are simply skipped; the next render after the DB
+// resolves will append them. This matches the lazy-loading pattern used
+// throughout the UI: state is always the source of truth, async-loaded
+// reference data shapes the *presentation* of that state.
+const generateSearchString = (currentState: SearchState, affixDb: AffixDb | null): string => {
   const parts: string[] = [];
 
   Object.entries(currentState.itemPotential).forEach(([key, macro]) => {
@@ -88,6 +98,26 @@ const generateSearchString = (currentState: SearchState): string => {
     }
   });
 
+  // Base/affix regex fragments. Each SelectedAffix becomes one fragment of
+  // the form `T<n>&/stat regex/` via affixToRegex. Skip silently if the DB
+  // isn't loaded yet (first paint) — the next render appends them. Orphan
+  // IDs (in state but not in DB) and validation failures from affixToRegex
+  // (e.g. slot/tier mismatch that somehow escaped the picker UI) are
+  // swallowed here rather than blowing up the whole output; the user will
+  // see the affix chip remain without its fragment in the search string,
+  // which is recoverable (remove + re-add).
+  if (affixDb !== null) {
+    for (const sa of currentState.selectedAffixes) {
+      const affix = affixDb[sa.affixId];
+      if (affix === undefined) continue;
+      try {
+        parts.push(affixToRegex(affix, sa.slot, sa.minTier, sa.exact));
+      } catch {
+        // Intentional: see comment above.
+      }
+    }
+  }
+
   return parts.join(currentState.globalOperator);
 };
 
@@ -97,16 +127,25 @@ export const StashSearchBuilder = () => {
   const [shared, setShared] = useState(false);
   const updateTimeoutRef = useRef<number | undefined>(undefined);
 
-  const searchString = generateSearchString(state);
+  // Lazy-load the affix database once per session. During the initial render
+  // (and SSR) this returns `{ data: null, loading: true }` — the search
+  // string is computed without affix regex fragments on that paint, then
+  // re-rendered with them as soon as the DB resolves.
+  const { data: affixDb } = useAffixDb();
 
-  // Debounced URL update when search string changes
+  const searchString = generateSearchString(state, affixDb);
+
+  // Debounced URL update when search string or selectedAffixes change. The
+  // `a=` param is encoded separately (see url-state.ts) because decoding it
+  // back out of the generated regex would be lossy — the string has to know
+  // which affix IDs + slots + tiers produced it.
   useEffect(() => {
     if (updateTimeoutRef.current) {
       clearTimeout(updateTimeoutRef.current);
     }
 
     updateTimeoutRef.current = window.setTimeout(() => {
-      updateURL(searchString);
+      updateURL(searchString, state.selectedAffixes);
     }, 500);
 
     return () => {
@@ -114,7 +153,11 @@ export const StashSearchBuilder = () => {
         clearTimeout(updateTimeoutRef.current);
       }
     };
-  }, [searchString]);
+  }, [searchString, state.selectedAffixes]);
+
+  const handleSelectedAffixesChange = useCallback((next: readonly SelectedAffix[]) => {
+    setState((prev) => ({ ...prev, selectedAffixes: next }));
+  }, []);
 
   const updateMacroWithValue = (
     category: keyof SearchState,
@@ -247,7 +290,7 @@ export const StashSearchBuilder = () => {
 
   const shareState = async () => {
     try {
-      const shareableLink = generateShareableLink(searchString);
+      const shareableLink = generateShareableLink(searchString, state.selectedAffixes);
       await navigator.clipboard.writeText(shareableLink);
       setShared(true);
       setTimeout(() => setShared(false), 2000);
@@ -323,6 +366,11 @@ export const StashSearchBuilder = () => {
         <EquipmentSlotsSection
           equipmentSlots={state.equipmentSlots}
           toggleSetItem={toggleSetItem}
+        />
+
+        <BaseAffixSection
+          selectedAffixes={state.selectedAffixes}
+          onSelectedAffixesChange={handleSelectedAffixesChange}
         />
 
         <CustomSearchSection

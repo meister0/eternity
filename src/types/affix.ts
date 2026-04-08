@@ -96,6 +96,13 @@ export interface ProcessedBase {
 
 export interface SelectedAffix {
   readonly affixId: number;
+  /** Equipment slot this affix was picked for. Because the same affix can
+   *  roll with different value ranges on different slots (e.g. affix 330
+   *  Mana Regeneration: Belt T8 = 94-110% vs Amulet T8 = 110-129%), the slot
+   *  is part of the selection identity — the regex generator needs it to
+   *  produce the correct numeric pattern. `(affixId, slot)` is the dedup key
+   *  for the UI, not `affixId` alone. */
+  readonly slot: EquipmentSlot;
   /** 1..8 */
   readonly minTier: number;
   /** true → only this exact tier. false → this tier or higher. */

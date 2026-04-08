@@ -1,5 +1,6 @@
+import { ALL_EQUIPMENT_SLOTS } from '../data/stash-macros';
 import type { SelectedAffix } from '../types/affix';
-import type { SearchState } from '../types/stash-search';
+import type { EquipmentSlot, SearchState } from '../types/stash-search';
 import { parseSearchString } from './search-parser';
 
 export const createInitialState = (): SearchState => ({
@@ -44,23 +45,40 @@ export const createInitialState = (): SearchState => ({
 // Selected-affix URL encoding
 // ---------------------------------------------------------------------------
 //
-// Format: comma-separated list of `<affixId>:<tier><suffix>` where suffix is
-// `=` for exact (only this tier) and `+` for inclusive (this tier or higher).
+// Format: comma-separated list of `<affixId>:<slot>:<tier><suffix>` where
+// `slot` is an EquipmentSlot literal (e.g. "Belt", "1HSword", "Amulet"),
+// suffix is `=` for exact (only this tier) and `+` for inclusive (this tier
+// or higher).
 //
 // Examples:
-//   "330:8="           — Mana Regen at exactly T8
-//   "330:8=,0:7+"      — two affixes
+//   "330:Belt:8="                  — Mana Regen exactly T8 on Belt
+//   "330:Belt:8=,330:Amulet:8="    — same affix on two different slots
+//                                    (per-slot value scaling makes them distinct)
+//   "330:Amulet:5+,0:Amulet:7+"    — two affixes on Amulet
+//
+// Breaking change from the previous format `<affixId>:<tier><suffix>`: slot
+// was not part of the identity before. A SelectedAffix must carry its slot
+// so `affixToRegex(affix, slot, minTier, exact)` can produce the correct
+// per-slot value regex (Belt T8 and Amulet T8 of the same affix have
+// different numeric ranges). No users of the old format in production yet,
+// so silently accepting the old format is not required.
 //
 // An empty selectedAffixes array OMITS the `a=` param entirely so clean URLs
 // stay clean.
 
 const SELECTED_AFFIXES_PARAM = 'a';
 
+const ALL_SLOT_SET: ReadonlySet<EquipmentSlot> = new Set<EquipmentSlot>(ALL_EQUIPMENT_SLOTS);
+
+function isEquipmentSlot(value: string): value is EquipmentSlot {
+  return (ALL_SLOT_SET as ReadonlySet<string>).has(value);
+}
+
 export function encodeSelectedAffixes(affixes: readonly SelectedAffix[]): string {
   return affixes
     .map((a) => {
       const suffix = a.exact ? '=' : '+';
-      return `${a.affixId}:${a.minTier}${suffix}`;
+      return `${a.affixId}:${a.slot}:${a.minTier}${suffix}`;
     })
     .join(',');
 }
@@ -69,17 +87,22 @@ export function decodeSelectedAffixes(raw: string | null | undefined): SelectedA
   if (!raw) return [];
   const out: SelectedAffix[] = [];
   for (const token of raw.split(',')) {
-    const m = token.trim().match(/^(\d+):(\d+)([=+])$/);
+    const m = token.trim().match(/^(\d+):([A-Za-z0-9]+):(\d+)([=+])$/);
     if (!m) {
       console.warn(`url-state: ignored malformed selected-affix token "${token}"`);
       continue;
     }
     const affixId = parseInt(m[1], 10);
-    const minTier = parseInt(m[2], 10);
-    const exact = m[3] === '=';
+    const slotRaw = m[2];
+    const minTier = parseInt(m[3], 10);
+    const exact = m[4] === '=';
     if (!Number.isInteger(affixId) || affixId < 0) continue;
     if (!Number.isInteger(minTier) || minTier < 1 || minTier > 8) continue;
-    out.push({ affixId, minTier, exact });
+    if (!isEquipmentSlot(slotRaw)) {
+      console.warn(`url-state: ignored selected-affix with unknown slot "${slotRaw}"`);
+      continue;
+    }
+    out.push({ affixId, slot: slotRaw, minTier, exact });
   }
   return out;
 }

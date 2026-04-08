@@ -30,13 +30,22 @@ export function BaseAffixSection({
 
   const handleAddAffix = useCallback(
     (affixId: number, tier: number, exact: boolean) => {
-      // Append only if not already in the list. Dedup by affixId.
-      if (selectedAffixes.some((sa) => sa.affixId === affixId)) {
+      // Safety guard — AffixSelector disables its Add button when slot is
+      // null, but also refuse here so a hand-crafted call can't produce a
+      // SelectedAffix with an invalid slot.
+      if (selectedSlot === null) return;
+      // Dedup key is (affixId, slot) — the same affix on two different
+      // slots is a distinct filter because per-slot value scaling means the
+      // generated regex differs. See SelectedAffix.slot docstring.
+      if (selectedAffixes.some((sa) => sa.affixId === affixId && sa.slot === selectedSlot)) {
         return;
       }
-      onSelectedAffixesChange([...selectedAffixes, { affixId, minTier: tier, exact }]);
+      onSelectedAffixesChange([
+        ...selectedAffixes,
+        { affixId, slot: selectedSlot, minTier: tier, exact },
+      ]);
     },
-    [selectedAffixes, onSelectedAffixesChange],
+    [selectedAffixes, onSelectedAffixesChange, selectedSlot],
   );
 
   const handleRemoveAffix = useCallback(

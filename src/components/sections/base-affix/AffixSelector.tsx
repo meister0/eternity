@@ -47,10 +47,15 @@ export function AffixSelector({ selectedSlot, selectedAffixes, onAddAffix }: Aff
     };
   }, [data, selectedSlot, filter]);
 
-  const selectedIds = useMemo(
-    () => new Set(selectedAffixes.map((sa) => sa.affixId)),
-    [selectedAffixes],
-  );
+  // Dedup check is scoped to the current slot: the same affix on a different
+  // slot is a separately-valid selection because per-slot value scaling makes
+  // its generated regex distinct. See SelectedAffix.slot docstring.
+  const selectedIdsOnSlot = useMemo(() => {
+    if (selectedSlot === null) return new Set<number>();
+    return new Set(
+      selectedAffixes.filter((sa) => sa.slot === selectedSlot).map((sa) => sa.affixId),
+    );
+  }, [selectedAffixes, selectedSlot]);
 
   return (
     <SectionContainer className="mb-6 md:mb-8">
@@ -91,7 +96,7 @@ export function AffixSelector({ selectedSlot, selectedAffixes, onAddAffix }: Aff
                     <AffixRow
                       key={affix.id}
                       affix={affix}
-                      disabled={selectedIds.has(affix.id)}
+                      disabled={selectedIdsOnSlot.has(affix.id)}
                       onAdd={onAddAffix}
                     />
                   ))}
@@ -111,7 +116,7 @@ export function AffixSelector({ selectedSlot, selectedAffixes, onAddAffix }: Aff
                     <AffixRow
                       key={affix.id}
                       affix={affix}
-                      disabled={selectedIds.has(affix.id)}
+                      disabled={selectedIdsOnSlot.has(affix.id)}
                       onAdd={onAddAffix}
                     />
                   ))}
