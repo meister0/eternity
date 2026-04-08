@@ -1,7 +1,25 @@
 import { useState } from 'react';
 import { useAffixDb } from '../../../data/affix-runtime';
+import { EQUIPMENT_SLOT_MACROS } from '../../../data/stash-macros';
 import type { ProcessedAffix, SelectedAffix } from '../../../types/affix';
+import type { EquipmentSlot } from '../../../types/stash-search';
 import { SectionContainer, SectionHeader } from '../../ui';
+
+/** Lookup map from EquipmentSlot literal → human-readable label
+ *  (e.g. "1HSword" → "1H Sword"). Built once at module load from the
+ *  canonical slot group definition used throughout the UI so every slot
+ *  display stays in sync. */
+const SLOT_LABEL: Readonly<Record<EquipmentSlot, string>> = Object.freeze(
+  EQUIPMENT_SLOT_MACROS.reduce(
+    (acc, group) => {
+      for (const item of group.items) {
+        acc[item.value] = item.label;
+      }
+      return acc;
+    },
+    {} as Record<EquipmentSlot, string>,
+  ),
+);
 
 interface SelectedAffixListProps {
   selectedAffixes: readonly SelectedAffix[];
@@ -103,6 +121,12 @@ export function SelectedAffixList({
                 title={affix?.name ?? undefined}
               >
                 {displayName}
+              </span>
+              <span
+                className="inline-flex items-center rounded bg-gray-600/70 px-1.5 text-[10px] font-medium text-gray-300"
+                title={`Slot: ${SLOT_LABEL[selected.slot] ?? selected.slot}`}
+              >
+                {SLOT_LABEL[selected.slot] ?? selected.slot}
               </span>
               {isEditing && !isLoading ? (
                 <span className="flex items-center gap-1">
