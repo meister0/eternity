@@ -236,6 +236,7 @@ export function validateSearchString(searchString: string): boolean {
         Experimental: { enabled: false, value: 0, operator: '=' },
         Personal: { enabled: false, value: 0, operator: '=' },
       },
+      selectedAffixes: [],
       regexPatterns: [{ pattern: '' }],
       globalOperator: '&',
       expressionOperators: [],

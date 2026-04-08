@@ -1,3 +1,5 @@
+import type { SelectedAffix } from './affix';
+
 // Operator types for macro values
 export type Operator = '=' | '+' | '-';
 
@@ -134,6 +136,7 @@ export interface SearchState {
   // Affix configuration
   affixTiers: AffixTier[];
   affixCounts: AffixCounts;
+  selectedAffixes: readonly SelectedAffix[];
 
   // Custom inputs
   regexPatterns: RegexPattern[];

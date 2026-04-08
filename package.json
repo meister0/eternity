@@ -11,6 +11,8 @@
     "format": "prettier --write --ignore-unknown \"**/*\"",
     "format:check": "prettier --check --ignore-unknown \"**/*\"",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "update-data": "node scripts/update-data.mjs",
     "scrape-tunklab": "node scripts/scrape-tunklab.mjs",
     "process-data": "node scripts/process-data.mjs"
