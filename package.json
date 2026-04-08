@@ -12,7 +12,9 @@
     "format:check": "prettier --check --ignore-unknown \"**/*\"",
     "typecheck": "tsc --noEmit",
     "update-data": "node scripts/update-data.mjs",
-    "process-data": "node scripts/process-data.mjs"
+    "process-data": "node scripts/process-data.mjs",
+    "scrape-tunklab": "node scripts/scrape-tunklab.mjs",
+    "build-affix-slots": "node scripts/build-affix-slots.mjs"
   },
   "dependencies": {
     "@astrojs/react": "^5.0.1",
