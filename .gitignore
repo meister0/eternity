@@ -29,3 +29,4 @@ pnpm-debug.log*
 # Re-fetch with: npm run update-data
 data/raw/*.json
 !data/raw/_meta.json
+.firecrawl/

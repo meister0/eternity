@@ -5,8 +5,11 @@
  * (from `../types/affix`) plus a tier selection into a regex fragment
  * compatible with LE's stash search macro language.
  *
- * See PLAN.md §1 for the worked example:
- *   T7 & /(9[4-9]|10\d|110)% increased mana regen/
+ * Tier model: T1..T8. T8 is the "primordial" tier added in the prior season,
+ * dramatically stronger than T7 and drop-only. See PLAN.md §4.
+ *
+ * Example output for Rejuvenating (affix 330) at T8 primordial:
+ *   T8 & /(9[4-9]|10\d|110)% increased mana regen/
  */
 
 import type { ProcessedAffix, ProcessedTier, ValueRange } from '../types/affix';
@@ -86,8 +89,11 @@ export function fuseRanges(ranges: readonly ValueRange[]): string {
 /**
  * Build a stash-search regex fragment for the given affix at the given tier.
  *
- * Example output for Rejuvenating (affix 330) at T7, exact=true:
- *   "T7&/(9[4-9]|10\\d|110)% increased mana regen/"
+ * Game tiers run from T1 (lowest) to T8 ("primordial", added in the prior
+ * season — drop-only, dramatically stronger than T7). See PLAN.md §4.
+ *
+ * Example output for Rejuvenating (affix 330) at T8, exact=true:
+ *   "T8&/(9[4-9]|10\\d|110)% increased mana regen/"
  */
 export function affixToRegex(affix: ProcessedAffix, minTier: number, exact: boolean): string {
   if (!affix.hasTierBreakdown) {
@@ -96,8 +102,8 @@ export function affixToRegex(affix: ProcessedAffix, minTier: number, exact: bool
         `and cannot be expressed with tier precision.`,
     );
   }
-  if (!Number.isInteger(minTier) || minTier < 1 || minTier > 7) {
-    throw new Error(`affixToRegex: minTier must be an integer in 1..7, got ${minTier}`);
+  if (!Number.isInteger(minTier) || minTier < 1 || minTier > 8) {
+    throw new Error(`affixToRegex: minTier must be an integer in 1..8, got ${minTier}`);
   }
 
   const affixMaxTier = affix.tiers.reduce((acc, t) => (t.tier > acc ? t.tier : acc), 0);

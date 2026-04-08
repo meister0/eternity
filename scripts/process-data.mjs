@@ -7,28 +7,49 @@
 // Output shapes match src/types/affix.ts (AffixDb, BaseDb) exactly.
 //
 // =============================================================================
-// TIER INDEXING — READ BEFORE EDITING
+// TIER INDEXING — READ BEFORE EDITING (see PLAN.md §4)
 // =============================================================================
 // PoB-LE's ModItem.json keys are "<affixId>_<tierIndex>" with tierIndex 0..7.
-// Empirically (see PLAN.md §4):
 //
-//   - 1112 affixes have a tier-0 entry.
-//   -  692 affixes also have tier 1..6 (and 643 of those also have tier 7).
-//   -  420 affixes have ONLY tier 0 (no per-tier breakdown — wide summary text).
+// Last Epoch now has 8 in-game tiers. T1..T7 are the pre-primordial tiers; T8
+// is the "primordial" top tier added in the prior season. ModItem's tier index
+// N maps DIRECTLY to Game tier (N+1) with a simple +1 shift:
 //
-// Value-based cross-checking (PLAN.md §4.2) confirmed that ModItem tier index N
-// corresponds to game tier N for N ∈ {1..7}. ModItem tier 0 is a synthetic
-// baseline that does NOT map to any in-game tier.
+//     ModItem tier 0 → Game T1
+//     ModItem tier 1 → Game T2
+//     ...
+//     ModItem tier 7 → Game T8 (primordial)
+//
+// There is NO synthetic baseline and NO entries are dropped. This was verified
+// empirically on 2026-04-08 by scraping Tunklab for affix 330 (Mana Regen):
+//
+//     ModItem `330_0` ("(10-14)% increased Mana Regen")  == Tunklab T1 == Game T1
+//     ModItem `330_7` ("(94-110)% increased Mana Regen") == Tunklab T8 == Game T8
+//
+// Empirical distribution in ModItem.json:
+//
+//   - 1112 total affixes (every affix has at least a tier-0 entry → Game T1).
+//   -  643 affixes have all 8 tiers (ModItem 0..7 → Game T1..T8).
+//   -   49 affixes are capped at ModItem tier 6 (Game T7) — no primordial roll.
+//   -  420 affixes have ONLY ModItem tier 0 → a single Game T1 entry. These
+//     are formerly "summary-only" specials; they're now just single-tier
+//     affixes with `tiers.length === 1` and `hasTierBreakdown: true`.
 //
 // Therefore:
-//   - For affixes with at least one tier >= 1, we DROP the tier-0 entry and
-//     emit only tiers 1..7 verbatim (no +1 adjustment anywhere).
-//   - For the ~420 affixes with only tier 0, we flag them `hasTierBreakdown:
-//     false`, emit `tiers: []`, and surface the lone entry as `summaryText`.
+//   - Emit every ModItem entry with its game tier = (ModItem index + 1).
+//   - Output `tier` values are always in the inclusive range 1..8.
+//   - `hasTierBreakdown` is true for ALL affixes (kept for schema stability).
+//   - `summaryText` is dropped entirely — it is no longer needed.
 //
-// Beware: PoB-LE `src/Classes/Item.lua:347-350` contains an off-by-one bug that
-// classifies tier index >= 5 as "exalted" (game exalted is T6+). It's a PoB bug
-// and not a hint about a different indexing convention. DO NOT add +1 anywhere.
+// Historical context: an earlier version of this script assumed ModItem tier 0
+// was a synthetic baseline and dropped it for affixes that had tier 1+ entries.
+// That was wrong — it silently lost Game T1 for all 692 normal affixes.
+//
+// Beware: PoB-LE `src/Classes/Item.lua:348` contains an off-by-one bug that
+// classifies tier index >= 5 as "exalted". Prior to primordial, game exalted
+// was T6+ (so PoB was off by one). With the T8 primordial tier added, that
+// bug is now effectively off by TWO tiers — PoB-LE predates primordial.
+// DO NOT propagate PoB's indexing mistake here.
 // =============================================================================
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -228,7 +249,8 @@ function groupEntriesByAffix(modItem) {
 
 /**
  * Build a ProcessedAffix for a single affix ID given all its tier entries.
- * Drops tier 0 for normal affixes. Emits summaryText for lone-tier-0 affixes.
+ * ModItem tier index N (0..7) maps directly to Game tier (N+1) (1..8). No
+ * entries are dropped; every collected entry is emitted.
  * @param {string} affixId
  * @param {Map<number, RawModItemEntry>} tierMap
  * @returns {object}
@@ -237,49 +259,26 @@ function buildProcessedAffix(affixId, tierMap) {
   const idNum = Number(affixId);
   const sortedTierIndexes = [...tierMap.keys()].sort((a, b) => a - b);
 
-  const hasHigherTier = sortedTierIndexes.some((t) => t >= 1);
-
-  // Pick a reference entry for stable metadata (name, type, statOrderKey).
-  // Prefer the lowest real tier over tier 0 where possible.
-  const referenceTierIndex = hasHigherTier
-    ? sortedTierIndexes.find((t) => t >= 1)
-    : sortedTierIndexes[0];
-  const reference = tierMap.get(referenceTierIndex);
-
+  // Reference entry for stable metadata (name, type, statOrderKey). Use the
+  // lowest-index entry — every affix has at least one, and values identical
+  // across tiers (affix name/type/statOrderKey never vary per tier).
+  const reference = tierMap.get(sortedTierIndexes[0]);
   const name = typeof reference.affix === 'string' ? reference.affix : '';
   const type = reference.type === 'Prefix' ? 'Prefix' : 'Suffix';
   const statOrderKey = Number(reference.statOrderKey);
 
-  if (!hasHigherTier) {
-    // Lone tier 0 — summary-only affix.
-    const entry = tierMap.get(0);
-    const summaryText = buildDisplayText(entry['1'], entry['2']);
+  const tiers = sortedTierIndexes.map((tierIndex) => {
+    const entry = tierMap.get(tierIndex);
+    const displayText = buildDisplayText(entry['1'], entry['2']);
+    const valueRanges = extractValueRanges(entry, affixId);
+    const level = Number.isFinite(entry.level) ? Number(entry.level) : 0;
     return {
-      id: idNum,
-      name,
-      type,
-      statOrderKey,
-      hasTierBreakdown: false,
-      tiers: [],
-      summaryText,
+      tier: tierIndex + 1, // ModItem index → Game tier (1..8).
+      displayText,
+      valueRanges,
+      level,
     };
-  }
-
-  // Normal affix — drop tier 0, emit tiers 1..N in ascending order.
-  const tiers = sortedTierIndexes
-    .filter((t) => t >= 1)
-    .map((tierIndex) => {
-      const entry = tierMap.get(tierIndex);
-      const displayText = buildDisplayText(entry['1'], entry['2']);
-      const valueRanges = extractValueRanges(entry, affixId);
-      const level = Number.isFinite(entry.level) ? Number(entry.level) : 0;
-      return {
-        tier: tierIndex,
-        displayText,
-        valueRanges,
-        level,
-      };
-    });
+  });
 
   return {
     id: idNum,
@@ -294,27 +293,31 @@ function buildProcessedAffix(affixId, tierMap) {
 /**
  * Build the full AffixDb keyed by string affix ID.
  * @param {Record<string, RawModItemEntry>} modItem
- * @returns {{affixes: Record<string, object>, stats: {total: number, withBreakdown: number, summaryOnly: number}}}
+ * @returns {{affixes: Record<string, object>, stats: {total: number, fullEight: number, cappedSeven: number, singleOne: number}}}
  */
 function buildAffixDb(modItem) {
   const grouped = groupEntriesByAffix(modItem);
   const affixes = {};
-  let withBreakdown = 0;
-  let summaryOnly = 0;
+  let fullEight = 0;
+  let cappedSeven = 0;
+  let singleOne = 0;
 
   for (const [affixId, tierMap] of grouped) {
     const processed = buildProcessedAffix(affixId, tierMap);
     affixes[affixId] = processed;
-    if (processed.hasTierBreakdown) withBreakdown++;
-    else summaryOnly++;
+    const len = processed.tiers.length;
+    if (len === 8) fullEight++;
+    else if (len === 7) cappedSeven++;
+    else if (len === 1) singleOne++;
   }
 
   return {
     affixes,
     stats: {
       total: grouped.size,
-      withBreakdown,
-      summaryOnly,
+      fullEight,
+      cappedSeven,
+      singleOne,
     },
   };
 }
@@ -393,75 +396,87 @@ function assert(condition, message) {
 }
 
 /**
- * Run the spot-check validations required by PLAN.md §8 P0.2.
- * @param {{affixes: Record<string, object>, stats: {total: number, withBreakdown: number, summaryOnly: number}}} built
+ * Run the spot-check validations required by the 8-tier model (PLAN.md §4).
+ * @param {{affixes: Record<string, object>, stats: {total: number, fullEight: number, cappedSeven: number, singleOne: number}}} built
  */
 function validateAffixes(built) {
   const { affixes, stats } = built;
 
-  // Spot-check: affix 330 (Rejuvenating / Mana Regen).
+  // Spot-check: affix 330 (Rejuvenating / Mana Regen). Verified against Tunklab
+  // 2026-04-08 — ModItem 330_0 == Game T1 (10-14%), ModItem 330_7 == Game T8 (94-110%).
   const a330 = affixes['330'];
   assert(a330, 'affix 330 missing');
   assert(a330.name === 'Rejuvenating', `affix 330 name = ${a330.name}`);
   assert(a330.type === 'Suffix', `affix 330 type = ${a330.type}`);
   assert(a330.hasTierBreakdown === true, `affix 330 hasTierBreakdown = ${a330.hasTierBreakdown}`);
-  assert(a330.tiers.length >= 7, `affix 330 tiers.length = ${a330.tiers.length}`);
-  const a330T7 = a330.tiers.find((t) => t.tier === 7);
-  assert(a330T7, 'affix 330 has no tier 7');
+  assert(a330.tiers.length === 8, `affix 330 tiers.length = ${a330.tiers.length} (expected 8)`);
+
+  const a330T1 = a330.tiers[0];
+  assert(a330T1.tier === 1, `affix 330 tiers[0].tier = ${a330T1.tier} (expected 1)`);
   assert(
-    a330T7.valueRanges.length === 1 &&
-      a330T7.valueRanges[0].min === 94 &&
-      a330T7.valueRanges[0].max === 110,
-    `affix 330 tier 7 valueRanges = ${JSON.stringify(a330T7.valueRanges)}`,
+    a330T1.valueRanges.length === 1 &&
+      a330T1.valueRanges[0].min === 10 &&
+      a330T1.valueRanges[0].max === 14,
+    `affix 330 tier 1 valueRanges = ${JSON.stringify(a330T1.valueRanges)}`,
   );
   assert(
-    a330T7.displayText.includes('(94-110)% increased Mana Regen'),
-    `affix 330 tier 7 displayText = ${JSON.stringify(a330T7.displayText)}`,
+    a330T1.displayText.includes('(10-14)% increased Mana Regen'),
+    `affix 330 tier 1 displayText = ${JSON.stringify(a330T1.displayText)}`,
+  );
+
+  const a330T8 = a330.tiers[7];
+  assert(a330T8.tier === 8, `affix 330 tiers[7].tier = ${a330T8.tier} (expected 8)`);
+  assert(
+    a330T8.valueRanges.length === 1 &&
+      a330T8.valueRanges[0].min === 94 &&
+      a330T8.valueRanges[0].max === 110,
+    `affix 330 tier 8 valueRanges = ${JSON.stringify(a330T8.valueRanges)}`,
   );
   assert(
-    !a330T7.displayText.includes('{rounding'),
-    `affix 330 tier 7 displayText still contains PoB marker: ${JSON.stringify(a330T7.displayText)}`,
+    a330T8.displayText.includes('(94-110)% increased Mana Regen'),
+    `affix 330 tier 8 displayText = ${JSON.stringify(a330T8.displayText)}`,
+  );
+  assert(
+    !a330T8.displayText.includes('{rounding'),
+    `affix 330 tier 8 displayText still contains PoB marker: ${JSON.stringify(a330T8.displayText)}`,
   );
 
   // Spot-check: affix 0 (Inevitable / Void Penetration).
   const a0 = affixes['0'];
   assert(a0, 'affix 0 missing');
   assert(a0.name === 'Inevitable', `affix 0 name = ${a0.name}`);
-  assert(a0.tiers.length === 7, `affix 0 tiers.length = ${a0.tiers.length}`);
-  const a0T7 = a0.tiers.find((t) => t.tier === 7);
-  assert(a0T7, 'affix 0 has no tier 7');
-  assert(
-    a0T7.displayText.includes('Void Penetration'),
-    `affix 0 tier 7 displayText = ${JSON.stringify(a0T7.displayText)}`,
-  );
+  assert(a0.tiers.length === 8, `affix 0 tiers.length = ${a0.tiers.length} (expected 8)`);
+  assert(a0.tiers[7].tier === 8, `affix 0 tiers[7].tier = ${a0.tiers[7].tier} (expected 8)`);
 
-  // Count sanity.
+  // Count sanity — expecting ~1112 total.
   assert(
     stats.total >= 1000 && stats.total <= 1300,
     `total affix count out of range: ${stats.total}`,
   );
   assert(
-    stats.withBreakdown >= 600,
-    `expected >= 600 affixes with tier breakdown, got ${stats.withBreakdown}`,
+    stats.fullEight >= 600,
+    `expected >= 600 affixes with full T1-T8 progression, got ${stats.fullEight}`,
   );
-  assert(
-    stats.summaryOnly >= 300,
-    `expected >= 300 summary-only affixes, got ${stats.summaryOnly}`,
-  );
+  assert(stats.cappedSeven >= 40, `expected >= 40 affixes capped at T7, got ${stats.cappedSeven}`);
+  assert(stats.singleOne >= 300, `expected >= 300 single-T1 affixes, got ${stats.singleOne}`);
 
-  // All breakdown affixes must have at least one tier entry.
+  // Every affix must have at least one tier, hasTierBreakdown always true,
+  // no summaryText field, and all tier indexes in 1..8 and strictly ascending.
   for (const [id, affix] of Object.entries(affixes)) {
-    if (affix.hasTierBreakdown) {
-      assert(affix.tiers.length >= 1, `affix ${id} flagged hasTierBreakdown but tiers.length = 0`);
-    } else {
+    assert(affix.hasTierBreakdown === true, `affix ${id} must have hasTierBreakdown === true`);
+    assert(affix.tiers.length >= 1, `affix ${id} has empty tiers array`);
+    assert(
+      !('summaryText' in affix),
+      `affix ${id} still has a summaryText field — should be dropped`,
+    );
+    let prev = 0;
+    for (const t of affix.tiers) {
       assert(
-        affix.tiers.length === 0,
-        `affix ${id} flagged !hasTierBreakdown but tiers.length = ${affix.tiers.length}`,
+        Number.isInteger(t.tier) && t.tier >= 1 && t.tier <= 8,
+        `affix ${id} tier value out of range: ${t.tier}`,
       );
-      assert(
-        typeof affix.summaryText === 'string',
-        `affix ${id} flagged !hasTierBreakdown but summaryText missing`,
-      );
+      assert(t.tier > prev, `affix ${id} tiers not strictly ascending: ${prev} → ${t.tier}`);
+      prev = t.tier;
     }
   }
 }
@@ -522,7 +537,7 @@ async function main() {
   const baseCount = Object.keys(basesSorted).length;
   console.log(
     `\u2713 public/data/affixes.json \u2014 ${built.stats.total} affixes ` +
-      `(${built.stats.withBreakdown} with tier breakdown, ${built.stats.summaryOnly} summary-only)`,
+      `(full T1-T8: ${built.stats.fullEight}, capped at T7: ${built.stats.cappedSeven}, single T1: ${built.stats.singleOne})`,
   );
   console.log(`\u2713 public/data/bases.json \u2014 ${baseCount} bases`);
 }

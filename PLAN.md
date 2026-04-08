@@ -28,13 +28,13 @@
 
 ## 1. Goal in plain English
 
-A user lands on the search builder, scrolls to the new section "Affixes by Base", picks **Belt** as the slot, optionally narrows to **Heavy Belt** as the base, sees the full list of prefixes and suffixes that can roll on a Belt, ticks "Mana Regen — minimum T7", and the output box at the bottom of the page now contains:
+A user lands on the search builder, scrolls to the new section "Affixes by Base", picks **Belt** as the slot, optionally narrows to **Heavy Belt** as the base, sees the full list of prefixes and suffixes that can roll on a Belt, ticks "Mana Regen — minimum T8", and the output box at the bottom of the page now contains:
 
 ```
-T7 & /(9[4-9]|10\d|110)% increased mana regen/
+T8 & /(9[4-9]|10\d|110)% increased mana regen/
 ```
 
-— ready to paste into Last Epoch's stash search. Multiple affixes can be selected, output composes them with `&`. UI shows live tier value ranges so the user understands what each tier means.
+— ready to paste into Last Epoch's stash search. Multiple affixes can be selected, output composes them with `&`. UI shows live tier value ranges so the user understands what each tier means (including the new top-tier **T8 Primordial**, see §4 and §11).
 
 ---
 
@@ -60,12 +60,12 @@ T7 & /(9[4-9]|10\d|110)% increased mana regen/
 
 Files in `data/raw/`, fetched from `raw.githubusercontent.com/Musholic/PathOfBuildingForLastEpoch/master/src/Data/`:
 
-| File                  | Source path                           | Size   | Contents                                                                          |
-| --------------------- | ------------------------------------- | ------ | --------------------------------------------------------------------------------- |
-| `ModItem.json`        | `src/Data/ModItem.json`               | 1.5 MB | 5907 entries, 1112 unique affix IDs, tiers 0-7 with `(min-max)` rolled value text |
-| `bases-full.json`     | `src/Data/Bases/bases.json`           | 247 KB | 897 bases with `type`, `req.level`, `implicits[]`, `baseTypeID`, `subTypeID`      |
-| `bases.json`          | `src/Data/LEToolsImport/bases.json`   | 120 KB | URL-slug → `{baseTypeId, subTypeId}` lookup (PoB internal)                        |
-| `affixes-id-map.json` | `src/Data/LEToolsImport/affixes.json` | 20 KB  | URL-slug → integer affix ID lookup (PoB internal)                                 |
+| File                  | Source path                           | Size   | Contents                                                                                                        |
+| --------------------- | ------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------- |
+| `ModItem.json`        | `src/Data/ModItem.json`               | 1.5 MB | 5907 entries, 1112 unique affix IDs, ModItem tier indices 0-7 (→ game T1-T8) with `(min-max)` rolled value text |
+| `bases-full.json`     | `src/Data/Bases/bases.json`           | 247 KB | 897 bases with `type`, `req.level`, `implicits[]`, `baseTypeID`, `subTypeID`                                    |
+| `bases.json`          | `src/Data/LEToolsImport/bases.json`   | 120 KB | URL-slug → `{baseTypeId, subTypeId}` lookup (PoB internal)                                                      |
+| `affixes-id-map.json` | `src/Data/LEToolsImport/affixes.json` | 20 KB  | URL-slug → integer affix ID lookup (PoB internal)                                                               |
 
 ### 3.2 ModItem.json schema (the important one)
 
@@ -130,45 +130,49 @@ Files in `data/raw/`, fetched from `raw.githubusercontent.com/Musholic/PathOfBui
 
 ---
 
-## 4. Tier indexing decision (locked in)
+## 4. Tier indexing decision (locked in, revised 2026-04-08)
+
+> **Revision note**: this section was rewritten on 2026-04-08 after empirical Tunklab verification revealed that Last Epoch added a **T8 "primordial" tier** in the prior season — a new top tier above T7 exalted, drop-only and dramatically stronger than T7. The original PLAN.md §4 (committed 2026-04-07) treated ModItem tier 0 as a synthetic baseline and assumed 7 game tiers; both assumptions were wrong. See §4.5 for the verification trail.
 
 ### 4.1 Empirical evidence
 
 Distribution of tier values in `ModItem.json`:
 
 ```
-Tier 0: 1112 unique IDs   ← every affix has this
-Tier 1: 692
-Tier 2: 692
-Tier 3: 692
-Tier 4: 692
-Tier 5: 692
-Tier 6: 692
-Tier 7: 643               ← 49 affixes capped at T6
+ModItem tier 0: 1112 unique IDs   ← every affix has this
+ModItem tier 1: 692
+ModItem tier 2: 692
+ModItem tier 3: 692
+ModItem tier 4: 692
+ModItem tier 5: 692
+ModItem tier 6: 692
+ModItem tier 7: 643               ← 49 affixes capped one tier short
 ```
 
-Inference:
+Inference (revised):
 
-- **420 affixes have ONLY tier 0** (1112 - 692 = 420). These are special/legacy mods that PoB-LE has no per-tier breakdown for. Examples: `of Life: +(30-80) Health` — the wide range tells you it's a summary across all tiers, not a real T1 roll.
-- **49 affixes have tiers 1-6 but no tier 7**. These are capped affixes (e.g. crafted-only mods, some idol mods).
-- **643 affixes have full tier 1-7 progression**.
+- **643 affixes have all 8 tiers** (ModItem 0..7 → Game T1..T8).
+- **49 affixes have ModItem tier 0..6** but no ModItem tier 7 → capped at **Game T7**, no T8 primordial roll.
+- **420 affixes have ONLY ModItem tier 0** → a single Game T1 entry. These are special-category affixes (altar/idol/uniques/sealed-only) with a single canonical roll. They are no longer "summary-only / broken"; they are first-class single-tier affixes.
 
-### 4.2 Verification by value: Inevitable (Void Penetration suffix, affix ID 0)
+### 4.2 Verification by value: Rejuvenating (Mana Regen prefix, affix ID 330)
 
-| ModItem index | Value in dump | Game tier (verified by community sources) |
-| ------------- | ------------- | ----------------------------------------- |
-| `0`           | +4%           | (no game equivalent — synthetic)          |
-| `1`           | +5%           | T1 ✓                                      |
-| `2`           | +6%           | T2 ✓                                      |
-| `3`           | +7%           | T3 ✓                                      |
-| `4`           | +(8-9)%       | T4 ✓                                      |
-| `5`           | +(11-12)%     | T5 ✓                                      |
-| `6`           | +(13-15)%     | T6 ✓                                      |
-| `7`           | +(24-30)%     | T7 ✓                                      |
+Verified empirically on 2026-04-08 by headless-rendering [`https://lastepoch.tunklab.com/affix/increased_mana_regen`](https://lastepoch.tunklab.com/affix/increased_mana_regen) and matching the rendered Tier1..Tier8 columns to ModItem entries `330_0`..`330_7`. Tunklab is a database site (not a planner) and treats T1-T8 as ground truth.
 
-**Conclusion: ModItem tier index N maps to game tier N for N ∈ {1..7}.** ModItem tier 0 is a synthetic/baseline entry that does NOT correspond to a real game tier.
+| ModItem index | Value in dump (Belt slot) | Tunklab column | Game tier                      |
+| ------------- | ------------------------- | -------------- | ------------------------------ |
+| `0`           | +(10-14)%                 | Tier1          | T1                             |
+| `1`           | +(15-19)%                 | Tier2          | T2                             |
+| `2`           | +(20-24)%                 | Tier3          | T3                             |
+| `3`           | +(25-29)%                 | Tier4          | T4                             |
+| `4`           | +(30-38)%                 | Tier5          | T5                             |
+| `5`           | +(40-49)%                 | Tier6          | T6                             |
+| `6`           | +(50-60)%                 | Tier7          | T7 (was top before primordial) |
+| `7`           | +(94-110)%                | Tier8          | **T8 primordial** ✦            |
 
-### 4.3 PoB-LE off-by-one wart
+**Conclusion: ModItem tier index `N` maps directly to Game tier `N+1`.** No synthetic baseline. No entries are dropped. The large value jump between ModItem tier 6 (50-60%) and tier 7 (94-110%) — roughly 2× — is the signature of T8 primordial; primordial rolls are dramatically stronger than T7.
+
+### 4.3 PoB-LE off-by-one wart (now off by two)
 
 `src/Classes/Item.lua:347-350`:
 
@@ -179,16 +183,31 @@ if tierIndex and tierIndex >= 5 then
 end
 ```
 
-This treats tier index `>= 5` as "exalted". In game, exalted is T6+. Combined with the value-based 1:1 mapping above, this means PoB-LE's planner displays T5 items as EXALTED rarity, which is wrong. **It's a bug in PoB-LE, not a hint about a different indexing convention.** Don't be misled by it.
+This treats ModItem tier index `>= 5` as "exalted". Under the corrected mapping, ModItem tier 5 = Game T6, so PoB-LE's planner displays T6 items as exalted. Game-true exalted starts at T6, so the boundary is approximately right by accident — but PoB-LE is also unaware of T8 primordial entirely, so it misclassifies T8 primordial drops as just another "exalted". **PoB-LE predates the primordial tier and has not been updated.** Treat any tier-related logic in PoB-LE source as historical, not authoritative. DO NOT propagate PoB's indexing mistake here.
 
 ### 4.4 Our handling
 
-Codified in `src/data-pipeline/process-data.mjs` and `src/types/affix.ts`:
+Codified in `scripts/process-data.mjs` and `src/types/affix.ts`:
 
-- **For affixes that have tier 1+ entries**: discard tier 0 entirely (it's synthetic).
-- **For the 420 affixes that have ONLY tier 0**: flag them with `hasTierBreakdown: false`. Exclude them from the tier-precision UI flow. Make them findable only by name in a separate "no-tier-data" list, with the raw `(min-max)` displayed as-is.
-- **UI labels**: "T1" through "T7" — matches game terminology and matches the stash search `T1`-`T7` macros 1:1.
-- **No `+1` adjustment anywhere.** ModItem tier 7 → game T7 → UI "T7" → stash macro `T7`.
+- **For all affixes**: emit every ModItem entry, mapping `tier: N` (ModItem index) to `tier: N+1` (Game tier). Output `tier` values are always in the inclusive range **1..8**.
+- **`hasTierBreakdown` is `true` for ALL affixes.** Even the 420 single-tier affixes share the normal flow with `tiers.length === 1`.
+- **The `summaryText` field is dropped entirely** — no longer needed.
+- **Capped affixes** (the 49 with no ModItem tier 7) emit `tiers.length === 7` (T1..T7). UI should disable the T8 picker option for these.
+- **Single-T1 affixes** (the 420) emit `tiers.length === 1` with `tier: 1`. UI should render a fixed-T1 label rather than a tier picker.
+- **UI labels**: "T1" through "T8". Highlight T8 with a distinct visual treatment (e.g. gold/violet, "Primordial" badge) since it's the new top-end tier and most users want to filter for it specifically.
+- **Stash search macro**: `T1` through `T8`. The user has confirmed `T8` works in LE stash search; if a future regression shows it doesn't, fall back to a value-only regex without the `T8&` prefix for primordial.
+- **No `+1` adjustment in the regex generator** — the generator consumes the already-mapped Game tier values from `affixes.json`; the +1 mapping happens once at processor build time.
+
+### 4.5 Verification source
+
+The corrected tier mapping was verified empirically on 2026-04-08:
+
+1. Headless-rendered https://lastepoch.tunklab.com/affix/increased_mana_regen using Playwright (Tunklab's Tier6-Tier8 columns are JS-hydrated and not present in raw HTML, so `curl` alone is insufficient — see [docs/data-sources.md](./docs/data-sources.md)).
+2. The rendered table showed 8 tier columns (Tier1..Tier8) per slot (Amulet, Belt, Relic, Ring), with per-slot value variations.
+3. The Belt-slot Tier1 value `(10% to 14%)` matched ModItem entry `330_0`; the Belt-slot Tier8 value `(94% to 110%)` matched ModItem entry `330_7`.
+4. The same pattern holds for other test affixes (Added Health and Added Health Regeneration / affix 825, Void Penetration / affix 0). All sampled affixes show 8 tier columns and consistent mapping.
+
+Tunklab is therefore the canonical source for tier values, slot mapping, and primordial status. PoB-LE ModItem.json remains useful as the cheap enumeration source (1112 affix IDs + numeric tier scaffolding) but its `affix` (name) and `type` (Prefix/Suffix) fields are unreliable — PoB-LE has known nulls and known misclassifications that Tunklab corrects. See [docs/data-sources.md](./docs/data-sources.md) for the broader Tunklab vs PoB-LE decision.
 
 ---
 
@@ -205,16 +224,16 @@ The new section `BaseAffixSection` slots into `StashSearchBuilder.tsx` between t
 │ SLOT         │ Base: [Heavy Belt   ▾]   │ Selected affixes (3)    │
 │ ○ Helmet     │ Implicit: +12 Health     │                         │
 │ ○ Body       │ Req level: 22            │ ┌─────────────────────┐ │
-│ ● Belt       │ ──────────────────────── │ │ Health        T7+ ×│ │
+│ ● Belt       │ ──────────────────────── │ │ Health        T8+ ×│ │
 │ ○ Boots      │ Search: [crit_______]    │ ├─────────────────────┤ │
-│ ○ Gloves     │ ──── Prefixes ────       │ │ Mana Regen    T7  ×│ │
-│ ○ Amulet     │  Health        [T7▾] +  │ ├─────────────────────┤ │
-│ ○ Ring       │  Armor         [T6+] +  │ │ All Resists   T6+ ×│ │
-│ ○ Relic      │  Vitality      [T7] ✓   │ └─────────────────────┘ │
-│  ► Weapons   │  Mana Regen    [T7] ✓   │                         │
+│ ○ Gloves     │ ──── Prefixes ────       │ │ Mana Regen    T8  ×│ │
+│ ○ Amulet     │  Health        [T8▾] +  │ ├─────────────────────┤ │
+│ ○ Ring       │  Armor         [T7+] +  │ │ All Resists   T7+ ×│ │
+│ ○ Relic      │  Vitality      [T8] ✓   │ └─────────────────────┘ │
+│  ► Weapons   │  Mana Regen    [T8] ✓   │                         │
 │  ► Off Hand  │ ──── Suffixes ────       │ Generated regex preview:│
-│  ► Idols     │  Crit Avoid    [T5+] +  │ ┌─────────────────────┐ │
-│              │  Resistances   [T6+] ✓  │ │ T7&/(9[4-9]|10\d|.. │ │
+│  ► Idols     │  Crit Avoid    [T6+] +  │ ┌─────────────────────┐ │
+│              │  Resistances   [T7+] ✓  │ │ T8&/(9[4-9]|10\d|.. │ │
 │              │  ...                     │ │ /increased mana reg.│ │
 │              │                          │ └─────────────────────┘ │
 │              │                          │ [Copy regex]            │
@@ -686,16 +705,18 @@ With aggressive parallelism: ~3 waves of work, since most UI components in P3 ar
 
 ## 11. Glossary
 
-- **Affix**: A prefix or suffix mod on an item. Has tiers T1-T7.
-- **Tier (T1-T7)**: Affix strength level. T1-T5 craftable, T6-T7 drop-only ("exalted").
-- **Exalted item**: Item with at least one T6 or T7 affix.
+- **Affix**: A prefix or suffix mod on an item. Has tiers T1-T8.
+- **Tier (T1-T8)**: Affix strength level. T1-T5 craftable, T6-T7 drop-only ("exalted"), T8 drop-only ("primordial", added in the prior season).
+- **Primordial (T8)**: The new top tier added in the prior season. Drop-only and dramatically stronger than T7 — typically ~2× the value range. UI should highlight T8 as a distinct visual tier.
+- **Exalted item**: Item with at least one T6, T7, or T8 affix.
 - **`statOrderKey`**: Affix family ID. Affixes with the same key are mutually exclusive on one item (e.g., two different mana regen variants).
 - **Implicit**: A mod that's always present on a base, not a rolled affix.
 - **Slot category**: `Helmet`, `Body`, `Belt`, etc. — what equipment slot the item goes in.
 - **Base / item base**: A specific item type within a slot (e.g., "Heavy Belt" within Belt slot). Has its own implicit and tier value scaling.
 - **Loot filter**: LE's XML-based item highlighting system. Has structured affix-ID + tier conditions. Out of scope for this project but our affix IDs are compatible with it.
 - **Stash search**: LE's text-based search for items in stash tabs. Supports macros, regex, and expressions. The output of this project.
-- **PoB-LE**: Path of Building for Last Epoch — open source build planner forked from PoB. Our data source.
+- **PoB-LE**: Path of Building for Last Epoch — open source build planner forked from PoB. Cheap enumeration source for affix IDs and numeric tier scaffolding; its `affix` (name) and `type` fields are unreliable and predate primordial.
+- **Tunklab**: [lastepoch.tunklab.com](https://lastepoch.tunklab.com) — community-maintained database site by user "Tunk". Canonical source for affix names, types, slot mapping, and per-slot tier values. Server-rendered with JS-hydrated tables, requires headless browser to scrape fully.
 - **`{rounding:Integer}`**: Marker in PoB-LE display text indicating the value should be rounded to integer for display. Strip before showing to user.
 
 ---
