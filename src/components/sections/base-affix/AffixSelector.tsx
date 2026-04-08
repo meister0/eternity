@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useAffixDb } from '../../../data/affix-runtime';
 import type { ProcessedAffix, SelectedAffix } from '../../../types/affix';
 import type { EquipmentSlot } from '../../../types/stash-search';
+import { compareAffixMatches, scoreAffixMatch } from '../../../utils/affix-search';
 import { AffixTierPicker } from './AffixTierPicker';
 
 interface AffixSelectorProps {
@@ -23,31 +24,31 @@ export function AffixSelector({ selectedSlot, selectedAffixes, onAddAffix }: Aff
     if (data === null) {
       return { prefixes: [] as ProcessedAffix[], suffixes: [] as ProcessedAffix[] };
     }
-    const needle = filter.trim().toLowerCase();
-    const matches = (affix: ProcessedAffix): boolean => {
-      if (needle === '') return true;
-      if (affix.name.toLowerCase().includes(needle)) return true;
-      if (affix.nickname !== null && affix.nickname.toLowerCase().includes(needle)) {
-        return true;
-      }
-      return false;
-    };
 
-    const all = Object.values(data).filter(
-      (affix) => affix.slots.includes(selectedSlot) && matches(affix),
-    );
-    const sortByName = (a: ProcessedAffix, b: ProcessedAffix): number =>
-      a.name.localeCompare(b.name);
+    // Gather everything in the current slot in one pass.
+    const slotAffixes = Object.values(data).filter((affix) => affix.slots.includes(selectedSlot));
+
+    const needle = filter.trim().toLowerCase();
+
+    let sorted: ProcessedAffix[];
+    if (needle === '') {
+      // No filter → alphabetical by name, same as before the ranked-
+      // search refactor. Alphabetical is the right default when the
+      // user is browsing rather than searching.
+      sorted = slotAffixes.slice().sort((a, b) => a.name.localeCompare(b.name));
+    } else {
+      // Filter → include only affixes whose match score is non-zero,
+      // then sort by score DESC with name as the tiebreaker. The
+      // scoring lives in affix-search.ts — see that module for the
+      // tier table and rationale.
+      sorted = slotAffixes
+        .filter((affix) => scoreAffixMatch(affix, needle) > 0)
+        .sort(compareAffixMatches(needle));
+    }
 
     return {
-      prefixes: all
-        .filter((a) => a.type === 'Prefix')
-        .slice()
-        .sort(sortByName),
-      suffixes: all
-        .filter((a) => a.type === 'Suffix')
-        .slice()
-        .sort(sortByName),
+      prefixes: sorted.filter((a) => a.type === 'Prefix'),
+      suffixes: sorted.filter((a) => a.type === 'Suffix'),
     };
   }, [data, selectedSlot, filter]);
 
