@@ -64,51 +64,98 @@ const PUBLIC_DATA_DIR = path.join(REPO_ROOT, 'public', 'data');
 
 const SCHEMA_VERSION = 1;
 
-// Known equipment slot vocabulary from bases-full.json `type` field. These do
-// NOT match the EquipmentSlot TS union verbatim (e.g. "Body Armor" vs "Body")
-// — the UI maps them later. This list is only used to warn on values that are
-// clearly not an equipment slot so future upstream changes are visible.
-const KNOWN_BASE_SLOTS = new Set([
-  'Adorned Idol',
-  'Amulet',
-  'Arctus Lens',
-  'Belt',
-  'Blessing',
-  'Body Armor',
-  'Boots',
-  'Bow',
-  'Dagger',
-  'Dysis Lens',
-  'Eos Lens',
-  'Gloves',
-  'Grand Idol',
-  'Greater Lens',
-  'Helmet',
-  'Huge Idol',
-  'Humble Idol',
-  'Idol Altar',
-  'Large Idol',
-  'Mesembria Lens',
-  'Minor Idol',
-  'Off-Hand Catalyst',
-  'One-Handed Axe',
-  'One-Handed Mace',
-  'One-Handed Sword',
-  'Ornate Idol',
-  'Quiver',
-  'Relic',
-  'Ring',
-  'Sceptre',
-  'Shield',
-  'Small Idol',
-  'Stout Idol',
-  'Two-Handed Axe',
-  'Two-Handed Mace',
-  'Two-Handed Spear',
-  'Two-Handed Staff',
-  'Two-Handed Sword',
-  'Wand',
-]);
+// Canonical mapping from PoB-LE `bases-full.json` `type` field → EquipmentSlot
+// union literal. PoB-LE uses its own slot vocabulary ("Body Armor",
+// "One-Handed Sword", "Off-Hand Catalyst") which does NOT match the UI's
+// `EquipmentSlot` type verbatim. Without this map, `bases.json` and
+// `affixes.json` would use different slot vocabularies and any join on slot
+// (e.g. filtering BasePicker by the slot selected in SlotPicker) would fail.
+//
+// `null` means intentional drop: the base is not equipment Claude/UI filters
+// on (Lenses are consumables, Blessings are timeline passives — neither are
+// in the `EquipmentSlot` union). These entries are skipped when building the
+// BaseDb. `undefined` (an entry absent from this map) means an unknown
+// upstream addition and is logged via `warnOnceUnknownBaseSlot`.
+//
+// Mirrors `TUNKLAB_SLOT_CANONICAL` above but keyed to the PoB-LE vocabulary.
+/** @type {Record<string, string | null>} */
+const POBLE_BASE_SLOT_CANONICAL = {
+  // Armor — identity passes listed explicitly so unknown-slot warnings only
+  // fire for genuinely unrecognized upstream additions.
+  Helmet: 'Helmet',
+  'Body Armor': 'Body',
+  Belt: 'Belt',
+  Boots: 'Boots',
+  Gloves: 'Gloves',
+  Amulet: 'Amulet',
+  Ring: 'Ring',
+  Relic: 'Relic',
+  // Weapons — PoB-LE uses hyphenated "One-Handed X" / "Two-Handed X" long
+  // form (distinct from Tunklab's un-hyphenated "One Handed X" form handled
+  // in TUNKLAB_SLOT_CANONICAL).
+  'One-Handed Axe': '1HAxe',
+  Dagger: 'Dagger',
+  'One-Handed Mace': '1HMace',
+  Sceptre: 'Sceptre',
+  'One-Handed Sword': '1HSword',
+  Wand: 'Wand',
+  'Two-Handed Axe': '2HAxe',
+  'Two-Handed Mace': '2HMace',
+  'Two-Handed Spear': 'Spear',
+  'Two-Handed Staff': 'Staff',
+  'Two-Handed Sword': '2HSword',
+  Bow: 'Bow',
+  // Off-hand
+  Quiver: 'Quiver',
+  Shield: 'Shield',
+  'Off-Hand Catalyst': 'Catalyst',
+  // Idols — PoB-LE uses the human-readable "<Size> Idol" form; we canonical-
+  // ize to the bare size literal to match EquipmentSlot.
+  'Small Idol': 'Small',
+  'Minor Idol': 'Minor',
+  'Humble Idol': 'Humble',
+  'Stout Idol': 'Stout',
+  'Grand Idol': 'Grand',
+  'Large Idol': 'Large',
+  'Ornate Idol': 'Ornate',
+  'Huge Idol': 'Huge',
+  'Adorned Idol': 'Adorned',
+  'Idol Altar': 'Altar',
+  // Intentional drops: not in the EquipmentSlot union and not equipment the
+  // user filters on. Lenses are consumables for lens crafting; Blessings are
+  // timeline passives.
+  Blessing: null,
+  'Arctus Lens': null,
+  'Dysis Lens': null,
+  'Eos Lens': null,
+  'Greater Lens': null,
+  'Mesembria Lens': null,
+};
+
+/** Set of unknown base slot strings already warned about, to avoid log spam. */
+const _warnedUnknownBaseSlots = new Set();
+
+/**
+ * Canonicalize a PoB-LE base slot string to an EquipmentSlot literal.
+ * Returns `null` for intentional drops (non-equipment) and `undefined` for
+ * unknown upstream additions (which the caller should also treat as a drop).
+ * @param {string} slot
+ * @returns {string | null | undefined}
+ */
+function canonicalizeBaseSlot(slot) {
+  if (slot in POBLE_BASE_SLOT_CANONICAL) {
+    return POBLE_BASE_SLOT_CANONICAL[slot];
+  }
+  if (!_warnedUnknownBaseSlots.has(slot)) {
+    _warnedUnknownBaseSlots.add(slot);
+    console.warn(
+      `warn: PoB-LE base slot "${slot}" is not in POBLE_BASE_SLOT_CANONICAL — ` +
+        `skipping affected bases. Add an entry to the map (or set to null to ` +
+        `intentionally drop).`,
+    );
+  }
+  return undefined;
+}
 
 /**
  * Read and JSON-parse a file. Throws a clear error if it fails.
@@ -602,18 +649,31 @@ function buildAffixDb(modItem, tunklabCache) {
  */
 
 /**
- * Build the BaseDb keyed by base display name.
+ * Build the BaseDb keyed by base display name. Drops bases whose slot is
+ * either an intentional non-equipment entry (Lenses, Blessings) or an
+ * unknown upstream addition — both cases return from `canonicalizeBaseSlot`
+ * as nullish. This keeps `base.slot` a valid `EquipmentSlot` literal so the
+ * BasePicker can filter by slot via an equality check rather than a lossy
+ * vocabulary translation.
  * @param {Record<string, RawBase>} rawBases
- * @returns {Record<string, object>}
+ * @returns {{bases: Record<string, object>, stats: {total: number, kept: number, droppedNonEquipment: number, droppedUnknown: number}}}
  */
 function buildBaseDb(rawBases) {
   const bases = {};
+  let kept = 0;
+  let droppedNonEquipment = 0;
+  let droppedUnknown = 0;
+  const total = Object.keys(rawBases).length;
   for (const [name, raw] of Object.entries(rawBases)) {
-    const slot = typeof raw.type === 'string' ? raw.type : '';
-    if (slot && !KNOWN_BASE_SLOTS.has(slot)) {
-      console.warn(
-        `warn: base "${name}" has unrecognised slot type "${slot}" — passed through verbatim`,
-      );
+    const rawSlot = typeof raw.type === 'string' ? raw.type : '';
+    const canonical = canonicalizeBaseSlot(rawSlot);
+    if (canonical === null) {
+      droppedNonEquipment += 1;
+      continue;
+    }
+    if (canonical === undefined) {
+      droppedUnknown += 1;
+      continue;
     }
     const level = raw.req && Number.isFinite(raw.req.level) ? Number(raw.req.level) : 0;
     const subTypeId = Number.isFinite(raw.subTypeID) ? Number(raw.subTypeID) : 0;
@@ -623,14 +683,15 @@ function buildBaseDb(rawBases) {
     const implicits = Array.isArray(raw.implicits) ? [...raw.implicits] : [];
     bases[name] = {
       name,
-      slot,
+      slot: canonical,
       subTypeId,
       level,
       implicits,
       affixEffectModifier,
     };
+    kept += 1;
   }
-  return bases;
+  return { bases, stats: { total, kept, droppedNonEquipment, droppedUnknown } };
 }
 
 /**
@@ -818,8 +879,8 @@ async function main() {
   const affixesSorted = sortKeys(built.affixes, 'numeric');
 
   // --- Bases ---
-  const basesBuilt = buildBaseDb(basesRaw);
-  const basesSorted = sortKeys(basesBuilt, 'alpha');
+  const { bases: basesBuiltMap, stats: baseStats } = buildBaseDb(basesRaw);
+  const basesSorted = sortKeys(basesBuiltMap, 'alpha');
 
   // --- Write outputs ---
   await mkdir(PUBLIC_DATA_DIR, { recursive: true });
@@ -847,7 +908,11 @@ async function main() {
       `\u2014 ${(affixBytes / 1024).toFixed(0)} KB`,
   );
   console.log(
-    `\u2713 public/data/bases.json \u2014 ${baseCount} bases \u2014 ${(baseBytes / 1024).toFixed(0)} KB`,
+    `\u2713 public/data/bases.json \u2014 ${baseCount} bases ` +
+      `(kept ${baseStats.kept}/${baseStats.total}; ` +
+      `dropped non-equipment: ${baseStats.droppedNonEquipment}, ` +
+      `dropped unknown: ${baseStats.droppedUnknown}) ` +
+      `\u2014 ${(baseBytes / 1024).toFixed(0)} KB`,
   );
 }
 
